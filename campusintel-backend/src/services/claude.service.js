@@ -1,9 +1,9 @@
 const supabase = require('../config/supabase');
 
 const DEV_MODE = process.env.CLAUDE_MOCK === 'true';
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || process.env.ANTHROPIC_API_KEY; // Fallback to old key name if they haven't renamed it
+const MODELSLAB_API_KEY = process.env.MODELSLAB_API_KEY || process.env.NVIDIA_API_KEY || process.env.ANTHROPIC_API_KEY; 
 const TIMEOUT_MS = 45000;
-const MODEL = 'meta/llama-3.1-70b-instruct'; // NVIDIA NIM standard accessible model
+const MODEL = 'deepseek-ai/DeepSeek-V3.2-Exp'; // ModelsLab DeepSeek V3.2
 
 // ── Mock Data (DEV_MODE=true → zero tokens burned) ────────────
 const MOCK_BRIEF = {
@@ -80,11 +80,11 @@ async function callWithFallback(systemPrompt, userMessage, maxTokens, logCtx = {
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-      const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+      const response = await fetch('https://modelslab.com/api/v7/llm/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${NVIDIA_API_KEY}`
+          'Authorization': `Bearer ${MODELSLAB_API_KEY}`
         },
         body: JSON.stringify({
           model: MODEL,
