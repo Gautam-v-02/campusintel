@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
 // Static demo data
@@ -45,8 +45,22 @@ function ReadinessRing({ score }: { score: number }) {
 }
 
 export default function DashboardPage() {
-  const [showPopup, setShowPopup] = useState(true);
+  const [showPopup, setShowPopup] = useState(false);
   const [popupStep, setPopupStep] = useState<'prompt' | 'debrief'>('prompt');
+
+  useEffect(() => {
+    // Only show popup if it hasn't been dismissed today
+    const dismissed = localStorage.getItem('interview_popup_dismissed');
+    const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+    if (!dismissed || parseInt(dismissed) < twoHoursAgo) {
+      setShowPopup(true);
+    }
+  }, []);
+
+  const dismissPopup = () => {
+    localStorage.setItem('interview_popup_dismissed', Date.now().toString());
+    setShowPopup(false);
+  };
 
   return (
     <div className="relative min-h-screen p-8">
@@ -77,12 +91,12 @@ export default function DashboardPage() {
                     className="flex-1 py-3 rounded-xl text-sm font-semibold border border-emerald-500/40 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/12 transition">
                     ✓ Yes, I interviewed
                   </button>
-                  <button onClick={() => setShowPopup(false)}
+                  <button onClick={dismissPopup}
                     className="flex-1 py-3 rounded-xl text-sm font-semibold border border-[#3a3a4d] text-[#6b7280] hover:bg-white/5 transition">
                     ✗ Didn&apos;t go
                   </button>
                 </div>
-                <button onClick={() => setShowPopup(false)}
+                <button onClick={dismissPopup}
                   className="w-full text-center text-[12px] text-[#4b4b6b] hover:text-[#6b7280] transition">
                   Remind me later
                 </button>
@@ -113,7 +127,7 @@ export default function DashboardPage() {
                       </button>
                     ))}
                   </div>
-                  <button onClick={() => setShowPopup(false)}
+                  <button onClick={dismissPopup}
                     className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition">
                     Submit Debrief →
                   </button>
