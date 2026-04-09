@@ -80,38 +80,40 @@ async function callWithFallback(systemPrompt, userMessage, maxTokens, logCtx = {
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-      // Using Google Gemini's official OpenAI Compatibility Endpoint
-      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
+      // Using Google Gemini Native REST API
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${GEMINI_API_KEY}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: MODEL,
-          max_tokens: maxTokens,
-          temperature: 0.5,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: currentMessage }
-          ]
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: `SYSTEM_INSTRUCTIONS: ${systemPrompt}\n\nUSER_REQUEST: ${currentMessage}` }]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.5,
+            maxOutputTokens: maxTokens
+          }
         }),
         signal: controller.signal
       });
 
       clearTimeout(timeout);
 
-      if (!response.ok) {
-        throw new Error(`ModelsLab API Error: ${response.status} - ${await response.text()}`);
-      }
-
       const json = await response.json();
+
+      if (!response.ok) {
+        throw new Error(`Gemini API Error: ${response.status} - ${JSON.stringify(json)}`);
+      }
       
-      if (!json.choices || !json.choices[0]) {
+      if (!json.candidates || !json.candidates[0] || !json.candidates[0].content) {
         throw new Error(`Gemini API Error: Unexpected Response Payload - ${JSON.stringify(json)}`);
       }
       
-      return json.choices[0].message.content;
+      return json.candidates[0].content.parts[0].text;
 
     } catch (error) {
       clearTimeout(timeout);
