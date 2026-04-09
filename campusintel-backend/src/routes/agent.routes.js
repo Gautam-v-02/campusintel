@@ -10,8 +10,8 @@ const { v4: uuidv4 } = require('uuid');
 // Primary demo: Rahul (low confidence, scrape fallback path)
 router.post('/trigger-demo', async (req, res) => {
   try {
-    const studentId = process.env.DEMO_STUDENT_ID || 'demo-student-rahul';
-    const driveId = process.env.DEMO_DRIVE_ID || 'demo-drive-google';
+    const studentId = 'demo-student-rahul';
+    const driveId = 'demo-drive-google';
     const forceSessionId = uuidv4();
     
     // Fire and forget the heavy Agent loop so the frontend gets the session instantly
@@ -27,8 +27,8 @@ router.post('/trigger-demo', async (req, res) => {
 // ── POST /api/agent/trigger-demo-low-data ────────────────────
 // Adversarial: force scrape by temporarily unverifying local debriefs
 router.post('/trigger-demo-low-data', async (req, res) => {
-  const studentId = process.env.DEMO_STUDENT_ID || 'demo-student-rahul';
-  const driveId = process.env.DEMO_DRIVE_ID || 'demo-drive-google';
+  const studentId = 'demo-student-rahul';
+  const driveId = 'demo-drive-google';
 
   // Temporarily unverify all local debriefs — agent finds 0
   await supabase
@@ -74,7 +74,7 @@ router.post('/trigger-demo-low-data', async (req, res) => {
 // Adversarial: Priya — high confidence, skips assessment + session
 router.post('/trigger-demo-high-confidence', async (req, res) => {
   const studentId = 'demo-student-priya';
-  const driveId = process.env.DEMO_DRIVE_ID || 'demo-drive-google';
+  const driveId = 'demo-drive-google';
 
   runAgentLoop(studentId, driveId).catch(console.error);
 
