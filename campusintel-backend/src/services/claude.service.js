@@ -3,7 +3,7 @@ const supabase = require('../config/supabase');
 const DEV_MODE = process.env.CLAUDE_MOCK === 'true';
 const MODELSLAB_API_KEY = process.env.MODELSLAB_API_KEY || process.env.NVIDIA_API_KEY || process.env.ANTHROPIC_API_KEY; 
 const TIMEOUT_MS = 45000;
-const MODEL = 'deepseek-ai/DeepSeek-V3.2-Exp'; // ModelsLab DeepSeek V3.2
+const MODEL = 'deepseek-ai-DeepSeek-V3.2-Exp'; // ModelsLab DeepSeek V3.2
 
 // ── Mock Data (DEV_MODE=true → zero tokens burned) ────────────
 const MOCK_BRIEF = {
