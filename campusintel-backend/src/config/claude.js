@@ -8,6 +8,8 @@ if (!apiKey) {
 
 const anthropic = new Anthropic({
   apiKey: apiKey || 'dummy_key',
+  // Route traffic to ModelsLab DeepSeek instead of Anthropic servers
+  baseURL: 'https://modelslab.com/api/v7/llm',
 });
 
 module.exports = anthropic;
