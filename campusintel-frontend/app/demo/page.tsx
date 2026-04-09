@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ReasoningTrace from '@/components/agent/ReasoningTrace';
 import PrepBrief from '@/components/student/PrepBrief';
 import TpcDashboard from '@/components/tpc/TpcDashboard';
@@ -35,11 +35,16 @@ export default function DemoScreen() {
       }
     } catch (e) {
       console.error(e);
-    } finally {
       setIsRunning(false);
     }
   };
 
+  // End the running state when the final agent step is logged or an error occurs
+  useEffect(() => {
+    if (logs.some((l) => l.step_name === 'UPDATE_STUDENT_STATE' || l.step_name === 'ERROR')) {
+      setIsRunning(false);
+    }
+  }, [logs]);
   return (
     <div className="min-h-screen bg-black text-gray-100 p-8 font-sans selection:bg-emerald-500/30">
       <div className="max-w-7xl mx-auto space-y-6">
