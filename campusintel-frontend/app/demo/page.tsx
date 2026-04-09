@@ -129,7 +129,6 @@ export default function DemoScreen() {
       <div className="max-w-7xl mx-auto space-y-6">
         
         {/* Header containing the scenario triggers */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gray-900 border border-gray-800 p-6 rounded-2xl shadow-xl">
         <header id="tour-demo-scenario" className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gray-900 border border-gray-800 p-6 rounded-2xl shadow-xl">
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -207,7 +206,6 @@ export default function DemoScreen() {
           {activeTab === 'TRACE' && <ReasoningTrace logs={logs} isActive={isRunning} />}
           {activeTab === 'BRIEF' && <PrepBrief logs={logs} />}
           {activeTab === 'TPC' && <TpcDashboard isDemoActive={!!sessionId} />}
-        </div>
         </div>
       </div>
       <TourReopen />
