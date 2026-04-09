@@ -103,6 +103,25 @@ export default function LandingPage() {
         </div>
       </main>
 
+      {/* Impact Stats Bar */}
+      <div className="w-full border-y border-[#1e1e30] bg-[#07070f]/90 backdrop-blur-sm relative z-10">
+        <div className="max-w-5xl mx-auto px-6 py-5 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+          {[
+            { value: '847', suffix: '+', label: 'Students Coached' },
+            { value: '23',  suffix: '',  label: 'Companies Tracked' },
+            { value: '3.2', suffix: '×', label: 'Interview Conversion' },
+            { value: '98',  suffix: 'ms',label: 'Avg Agent Response' },
+          ].map((stat) => (
+            <div key={stat.label} className="group">
+              <div className="text-2xl md:text-3xl font-display font-bold text-white group-hover:text-indigo-300 transition-colors">
+                {stat.value}<span className="text-indigo-400">{stat.suffix}</span>
+              </div>
+              <div className="text-xs text-[#6b7280] mt-1 tracking-wide">{stat.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Massive App Preview Window */}
       <section className="max-w-6xl mx-auto px-6 relative z-10 -mt-12 mb-32">
         <div className="rounded-2xl border border-[#2a2a3d] bg-[#0a0a14]/80 backdrop-blur-xl shadow-[0_0_100px_rgba(79,70,229,0.15)] overflow-hidden">

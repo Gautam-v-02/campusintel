@@ -4,6 +4,7 @@ import ReasoningTrace from '@/components/agent/ReasoningTrace';
 import PrepBrief from '@/components/student/PrepBrief';
 import TpcDashboard from '@/components/tpc/TpcDashboard';
 import ResumeUploader from '@/components/student/ResumeUploader';
+import ConfidenceChart from '@/components/agent/ConfidenceChart';
 import { useAgentLogs } from '@/hooks/useAgentLogs';
 import { api } from '@/lib/api';
 import { TourProvider, TourReopen } from '@/components/tour/TourProvider';
@@ -59,7 +60,7 @@ const REPLAY_LOGS = [
 export default function DemoScreen() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [activeTab, setActiveTab] = useState<'TRACE' | 'BRIEF' | 'TPC' | 'RESUME'>('TRACE');
+  const [activeTab, setActiveTab] = useState<'TRACE' | 'BRIEF' | 'TPC' | 'RESUME' | 'CHART'>('TRACE');
   const [scenario, setScenario] = useState<'STANDARD' | 'LOW_DATA' | 'HIGH_CONF'>('STANDARD');
   const [replayMode, setReplayMode] = useState(false);
   const [replayLogs, setReplayLogs] = useState<typeof REPLAY_LOGS>([]);
@@ -192,18 +193,18 @@ export default function DemoScreen() {
         </div>
 
         {/* Tab Navigation */}
-        <div id="tour-demo-tabs" className="flex gap-2 border-b border-gray-800 pb-px pt-2 px-2 rounded-t-xl bg-gray-900/20">
-          {(['TRACE', 'BRIEF', 'TPC', 'RESUME'] as const).map((tab) => (
+        <div id="tour-demo-tabs" className="flex gap-2 border-b border-gray-800 pb-px pt-2 px-2 rounded-t-xl bg-gray-900/20 overflow-x-auto">
+          {(['TRACE', 'CHART', 'BRIEF', 'TPC', 'RESUME'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
-              className={`px-6 py-3 font-semibold text-sm rounded-t-lg transition-colors ${
+              className={`px-5 py-3 font-semibold text-sm rounded-t-lg transition-colors whitespace-nowrap ${
                 activeTab === tab 
                   ? 'bg-gray-900 text-emerald-400 border border-b-0 border-gray-800 relative after:absolute after:bottom-[-1px] after:left-0 after:w-full after:h-px after:bg-gray-900' 
                   : 'text-gray-500 hover:text-gray-300'
               }`}
             >
-              {tab === 'TRACE' ? '🧠 Live Reasoning Trace' : tab === 'BRIEF' ? '📋 Generated Brief' : tab === 'TPC' ? '🏫 TPC Dashboard' : '📄 Resume Upload'}
+              {tab === 'TRACE' ? '🧠 Live Reasoning' : tab === 'CHART' ? '📈 Confidence Chart' : tab === 'BRIEF' ? '📋 Generated Brief' : tab === 'TPC' ? '🏫 TPC Dashboard' : '📄 Resume Upload'}
             </button>
           ))}
         </div>
@@ -211,6 +212,7 @@ export default function DemoScreen() {
         {/* Content Area */}
         <div id="tour-demo-trace" className="mt-6 rounded-xl p-1">
           {activeTab === 'TRACE' && <ReasoningTrace logs={logs} isActive={isRunning} />}
+          {activeTab === 'CHART' && <ConfidenceChart logs={logs} isActive={isRunning} />}
           {activeTab === 'BRIEF' && <PrepBrief logs={logs} />}
           {activeTab === 'TPC' && <TpcDashboard isDemoActive={!!sessionId} contextName={scenario === 'HIGH_CONF' ? 'Priya Mehta' : 'Rahul Sharma'} />}
           {activeTab === 'RESUME' && (

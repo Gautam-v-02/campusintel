@@ -104,9 +104,8 @@ export default function DebriefPage() {
         setErrorMsg(res.error || 'Submission failed.');
         setStatus('error');
       }
-    } catch (err: any) {
-      const msg = err?.message || String(err);
-      setErrorMsg(`Network error: ${msg}. API URL: ${process.env.NEXT_PUBLIC_API_URL || 'localhost:3001 (env not set!)'}`);
+    } catch {
+      setErrorMsg('Could not reach server. Please try again in a moment.');
       setStatus('error');
     }
   };
@@ -137,17 +136,25 @@ export default function DebriefPage() {
 
       {/* Success Banner */}
       {status === 'success' && result && (
-        <div className="mb-8 animate-fade-in-up">
-          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-6 mb-4">
+        <div className="mb-8 animate-fade-in-up space-y-4">
+
+          {/* Header */}
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-6">
             <div className="flex items-center gap-3 mb-4">
               <span className="text-3xl">⚡</span>
               <div>
                 <div className="text-lg font-bold text-white">Intel Updated!</div>
                 <div className="text-sm text-emerald-400">{result.message}</div>
               </div>
+              <div className="ml-auto text-right">
+                <div className="text-2xl font-display font-bold text-white">{result.total_debriefs}</div>
+                <div className="text-xs text-[#6b7280]">total debriefs</div>
+              </div>
             </div>
+
+            {/* Topic frequency bars */}
             <div className="text-xs font-mono text-indigo-400 uppercase tracking-widest mb-3">
-              Re-synthesized from {result.total_debriefs} total debriefs
+              Live Intelligence — Re-synthesized from {result.total_debriefs} debriefs
             </div>
             <div className="space-y-2">
               {result.synthesized_topics?.map((t: any, i: number) => (
@@ -165,10 +172,45 @@ export default function DebriefPage() {
               ))}
             </div>
           </div>
-          <button onClick={() => { setStatus('idle'); setResult(null); setForm({ roundType: 'technical_1', questionsAsked: '', topicsCovered: [], outcome: 'selected', difficultyRating: 3, company: 'Google' }); }}
-            className="text-sm text-[#9b9bbb] hover:text-white transition">
-            + Submit another debrief
-          </button>
+
+          {/* Before / After Comparison */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-xs text-red-400 font-mono uppercase tracking-widest mb-3">
+                <span>✕</span> Before This Debrief
+              </div>
+              <ul className="space-y-2 text-xs text-[#6b7280]">
+                <li>• &ldquo;Focus on DSA basics&rdquo; (generic)</li>
+                <li>• No company-specific context</li>
+                <li>• Based on stale internet lists</li>
+                <li>• Confidence: <span className="text-red-400 font-semibold">LOW</span></li>
+              </ul>
+            </div>
+            <div className="bg-emerald-500/5 border border-emerald-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-xs text-emerald-400 font-mono uppercase tracking-widest mb-3">
+                <span>→</span> After Your Debrief
+              </div>
+              <ul className="space-y-2 text-xs text-[#c4c4d8]">
+                {result.synthesized_topics?.slice(0, 3).map((t: any) => (
+                  <li key={t.topic}>• <span className="font-mono">{t.topic}</span> — {(t.frequency * 100).toFixed(0)}% of rounds</li>
+                ))}
+                <li>• Confidence: <span className={`font-semibold ${result.total_debriefs >= 5 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {result.total_debriefs >= 10 ? 'HIGH' : result.total_debriefs >= 5 ? 'MEDIUM' : 'LOW → BUILDING'}
+                </span></li>
+              </ul>
+            </div>
+          </div>
+
+          {/* CTA */}
+          <div className="flex items-center justify-between">
+            <button onClick={() => { setStatus('idle'); setResult(null); setForm({ roundType: 'technical_1', questionsAsked: '', topicsCovered: [], outcome: 'selected', difficultyRating: 3, company: 'Google' }); }}
+              className="text-sm text-[#9b9bbb] hover:text-white transition">
+              + Submit another debrief
+            </button>
+            <a href="/demo" className="text-sm px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition">
+              🧠 Run Agent with Updated Intel →
+            </a>
+          </div>
         </div>
       )}
 
