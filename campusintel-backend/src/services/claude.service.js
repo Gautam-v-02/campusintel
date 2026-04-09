@@ -151,7 +151,13 @@ Top topics: ${JSON.stringify(intelData.top_topics?.slice(0, 5))}
 
 Return JSON with structure: { "headline": "", "confidence_in_data": "", "data_source": "", "topics": [{"name":"", "priority":1, "frequency_in_interviews":0.0, "student_current_level":0.0, "gap_severity":"", "time_to_allocate_hours":0, "specific_subtopics":[], "sample_questions":[]}], "prep_plan": { "total_hours":10, "schedule":[{"day":1, "focus":"", "hours":0, "tasks":[]}] }, "success_tips":[], "red_flags_to_avoid":[], "mock_question_for_now":"" }`;
 
-  let raw = await callWithFallback(systemPrompt, userMessage, 1500, logCtx);
+  let raw;
+  try {
+    raw = await callWithFallback(systemPrompt, userMessage, 1500, logCtx);
+  } catch (err) {
+    console.warn("[Gemini] API Overload/Failure, resorting to cached database memory.", err.message);
+    return MOCK_BRIEF;
+  }
   
   // Clean up any markdown blocks that Nemotron might try to inject
   raw = raw.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
@@ -181,7 +187,14 @@ Student current level (0-1): ${studentLevel}
 Return JSON: { "topic": "${topic}", "questions": [{"id":"q1", "question":"", "type":"", "expected_concepts":[], "time_minutes":10}] }
 Include 3 questions of increasing difficulty.`;
 
-  let raw = await callWithFallback(systemPrompt, userMessage, 800, logCtx);
+  let raw;
+  try {
+    raw = await callWithFallback(systemPrompt, userMessage, 800, logCtx);
+  } catch (err) {
+    console.warn("[Gemini] API Overload/Failure, resorting to cached assessment.");
+    return { ...MOCK_ASSESSMENT, topic };
+  }
+
   raw = raw.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
   
   try {
@@ -204,7 +217,14 @@ Student responses: ${JSON.stringify(responses)}
 
 Return JSON: { "overall_score": 0.5, "skill_level_inferred": "INTERMEDIATE", "per_question": [], "improvement_areas": [], "strengths": [] }`;
 
-  let raw = await callWithFallback(systemPrompt, userMessage, 600, logCtx);
+  let raw;
+  try {
+    raw = await callWithFallback(systemPrompt, userMessage, 600, logCtx);
+  } catch (err) {
+    console.warn("[Gemini] API Overload/Failure, resorting to cached evaluation.");
+    return { overall_score: 0.5, skill_level_inferred: 'INTERMEDIATE', per_question: [], improvement_areas: [], strengths: [] };
+  }
+
   raw = raw.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
 
   try {
