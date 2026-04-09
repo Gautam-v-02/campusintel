@@ -21,4 +21,5 @@ export const api = {
   getAlerts: (collegeId: string) => get(`/api/tpc/alerts/${collegeId}`),
   getStrategyWeights: () => get(`/api/tpc/strategy-weights/college-lpu-001/company-google-001`),
   getBrief: (studentId: string) => get(`/api/tpc/briefs/${studentId}`),
+  getAgentStatus: () => get(`/api/agent/status`),
 };

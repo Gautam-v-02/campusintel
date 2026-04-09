@@ -29,7 +29,7 @@ export default function DemoScreen() {
       if (res.status?.includes('triggered') && !res.sessionId) {
         // Find latest session from status if not returned directly
         setTimeout(async () => {
-          const st = await fetch('http://localhost:3001/api/agent/status').then(r => r.json());
+          const st = await api.getAgentStatus(); // Make sure this uses the api utility
           if (st.recent_steps?.[0]?.session_id) setSessionId(st.recent_steps[0].session_id);
         }, 1000);
       }
