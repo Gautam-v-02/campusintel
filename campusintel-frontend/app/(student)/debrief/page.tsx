@@ -104,8 +104,9 @@ export default function DebriefPage() {
         setErrorMsg(res.error || 'Submission failed.');
         setStatus('error');
       }
-    } catch {
-      setErrorMsg('Could not reach server. Check that the backend is running.');
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      setErrorMsg(`Network error: ${msg}. API URL: ${process.env.NEXT_PUBLIC_API_URL || 'localhost:3001 (env not set!)'}`);
       setStatus('error');
     }
   };
