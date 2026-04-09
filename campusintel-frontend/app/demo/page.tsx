@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import ReasoningTrace from '@/components/agent/ReasoningTrace';
 import PrepBrief from '@/components/student/PrepBrief';
 import TpcDashboard from '@/components/tpc/TpcDashboard';
+import ResumeUploader from '@/components/student/ResumeUploader';
 import { useAgentLogs } from '@/hooks/useAgentLogs';
 import { api } from '@/lib/api';
 import { TourProvider, TourReopen } from '@/components/tour/TourProvider';
@@ -58,7 +59,7 @@ const REPLAY_LOGS = [
 export default function DemoScreen() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [activeTab, setActiveTab] = useState<'TRACE' | 'BRIEF' | 'TPC'>('TRACE');
+  const [activeTab, setActiveTab] = useState<'TRACE' | 'BRIEF' | 'TPC' | 'RESUME'>('TRACE');
   const [scenario, setScenario] = useState<'STANDARD' | 'LOW_DATA' | 'HIGH_CONF'>('STANDARD');
   const [replayMode, setReplayMode] = useState(false);
   const [replayLogs, setReplayLogs] = useState<typeof REPLAY_LOGS>([]);
@@ -161,6 +162,12 @@ export default function DemoScreen() {
             >
               ⭐ High Confidence (Priya)
             </button>
+            <a
+              href="/debrief"
+              className="px-5 py-2.5 bg-violet-600/20 hover:bg-violet-600/40 text-violet-300 border border-violet-500/40 rounded-lg font-semibold transition ring-0"
+            >
+              📝 Submit Debrief
+            </a>
           </div>
         </header>
 
@@ -186,7 +193,7 @@ export default function DemoScreen() {
 
         {/* Tab Navigation */}
         <div id="tour-demo-tabs" className="flex gap-2 border-b border-gray-800 pb-px pt-2 px-2 rounded-t-xl bg-gray-900/20">
-          {['TRACE', 'BRIEF', 'TPC'].map((tab) => (
+          {(['TRACE', 'BRIEF', 'TPC', 'RESUME'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
@@ -196,7 +203,7 @@ export default function DemoScreen() {
                   : 'text-gray-500 hover:text-gray-300'
               }`}
             >
-              {tab === 'TRACE' ? '🧠 Live Reasoning Trace' : tab === 'BRIEF' ? '📋 Generated Brief' : '🏫 TPC Dashboard'}
+              {tab === 'TRACE' ? '🧠 Live Reasoning Trace' : tab === 'BRIEF' ? '📋 Generated Brief' : tab === 'TPC' ? '🏫 TPC Dashboard' : '📄 Resume Upload'}
             </button>
           ))}
         </div>
@@ -206,6 +213,24 @@ export default function DemoScreen() {
           {activeTab === 'TRACE' && <ReasoningTrace logs={logs} isActive={isRunning} />}
           {activeTab === 'BRIEF' && <PrepBrief logs={logs} />}
           {activeTab === 'TPC' && <TpcDashboard isDemoActive={!!sessionId} contextName={scenario === 'HIGH_CONF' ? 'Priya Mehta' : 'Rahul Sharma'} />}
+          {activeTab === 'RESUME' && (
+            <div className="space-y-4">
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h3 className="text-base font-bold text-white mb-1">📄 Resume Upload Demo</h3>
+                <p className="text-sm text-gray-400 mb-4">Upload any student resume PDF. Gemini AI will extract a skills profile and update the student's readiness score — no form filling required.</p>
+                <ResumeUploader studentId="demo-student-rahul" />
+              </div>
+              <div className="bg-violet-900/10 border border-violet-500/20 rounded-xl p-4 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-white">📝 Submit a Real Debrief</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Share an interview experience to update Google's intelligence for all future students at LPU.</div>
+                </div>
+                <a href="/debrief" className="ml-4 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition whitespace-nowrap">
+                  Go to Debrief →
+                </a>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

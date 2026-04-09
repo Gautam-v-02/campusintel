@@ -25,6 +25,8 @@ app.get('/health', (req, res) => {
 app.use('/api/agent', require('./routes/agent.routes'));
 app.use('/api/tpc', require('./routes/tpc.routes'));
 app.use('/api/drives', require('./routes/drive.routes'));
+app.use('/api/debriefs', require('./routes/debrief.routes'));
+app.use('/api/student', require('./routes/student.routes'));
 
 // ── Global error handler ──────────────────────────────────────
 app.use((err, req, res, next) => {

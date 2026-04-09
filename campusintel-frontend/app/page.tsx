@@ -36,6 +36,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-6 text-sm">
             <Link href="/pulse" className="text-[#9b9bbb] hover:text-indigo-400 transition">Network</Link>
             <Link href="/demo" className="text-[#9b9bbb] hover:text-indigo-400 transition">Agent Trace</Link>
+            <Link href="/debrief" className="text-[#9b9bbb] hover:text-emerald-400 transition">Submit Debrief</Link>
             <Link href="/login" 
               className="px-4 py-1.5 rounded-full border border-[#2a2a3d] text-[#c4c4d8] hover:bg-white/5 transition">
               Sign In
@@ -228,7 +229,32 @@ export default function LandingPage() {
             </p>
           </div>
 
-          {/* Card 4 */}
+          {/* Card 5 — Resume Parsing */}
+          <div className="bg-[#0a0a14] border border-[#1e1e30] hover:border-indigo-500/30 rounded-3xl p-8 transition-colors">
+            <div className="text-[11px] text-indigo-400 font-mono tracking-widest uppercase mb-4">04 // Resume AI</div>
+            <h3 className="text-2xl font-display text-white mb-3">Upload. Don't Type.</h3>
+            <p className="text-[#8b8b9f] leading-relaxed">
+              Student uploads a PDF resume. Gemini AI extracts a skills profile automatically — no forms, no onboarding friction.
+            </p>
+          </div>
+
+          {/* Card 6 — Debrief Loop */}
+          <div className="md:col-span-2 bg-[#0a0a14] border border-emerald-500/20 hover:border-emerald-500/40 rounded-3xl p-8 transition-colors relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-3xl rounded-full" />
+            <div className="relative z-10">
+              <div className="text-[11px] text-emerald-400 font-mono tracking-widest uppercase mb-4">05 // Closed Loop</div>
+              <h3 className="text-2xl font-display text-white mb-3">The Network Feeds Itself</h3>
+              <p className="text-[#8b8b9f] leading-relaxed max-w-xl mb-5">
+                Every student who submits a debrief immediately improves the intelligence available to future candidates. The system synthesizes patterns from raw interview notes in real-time.
+              </p>
+              <Link href="/debrief"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 transition">
+                Submit Your Own Debrief →
+              </Link>
+            </div>
+          </div>
+
+          {/* Card 4 — Admin */}
           <div className="md:col-span-2 bg-[#0a0a14] border border-[#1e1e30] rounded-3xl p-8 relative overflow-hidden">
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#1e1e30]/20 to-transparent animate-[shimmer_3s_infinite]" />
             <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">

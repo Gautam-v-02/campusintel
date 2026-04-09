@@ -234,4 +234,4 @@ Return JSON: { "overall_score": 0.5, "skill_level_inferred": "INTERMEDIATE", "pe
   }
 }
 
-module.exports = { generateBrief, generateAssessment, evaluateAssessment };
+module.exports = { generateBrief, generateAssessment, evaluateAssessment, callWithFallback };
