@@ -403,16 +403,17 @@ async function runAgentLoop(studentId, driveId, forceSessionId = null) {
 
   } catch (err) {
     console.error(`[Reactor] ❌ Error at step ${stepNum}:`, err.message);
-    if (ctx.collegeId) {
-      await logStep({
-        ...ctx, stepNumber: stepNum, stepName: 'ERROR',
-        input: {}, output: {},
-        decisionBasis: err.message,
-        decisionMade: 'AGENT_FAILED',
-        startedAt: new Date(), status: 'failed',
-        errorMessage: err.message,
-      });
-    }
+    // Always log the crash, even if we failed before obtaining collegeId
+    await logStep({
+      ...ctx,
+      collegeId: ctx.collegeId || 'college-lpu-001', // Fallback so DB constraints don't reject it
+      stepNumber: stepNum, stepName: 'ERROR',
+      input: {}, output: {},
+      decisionBasis: err.message,
+      decisionMade: 'AGENT_FAILED',
+      startedAt: new Date(), status: 'failed',
+      errorMessage: err.message,
+    });
     throw err;
   }
 }
