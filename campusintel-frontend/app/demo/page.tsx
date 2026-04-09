@@ -31,6 +31,18 @@ export default function DemoScreen() {
   const { logs: liveLogs, wsConnected } = useAgentLogs(sessionId);
   const logs = replayMode ? replayLogs : liveLogs;
 
+  // Extracted so it can be called both on API failure AND on timeout
+  const startReplay = () => {
+    setReplayMode(true);
+    setIsRunning(true);
+    setReplayLogs([]);
+    REPLAY_LOGS.forEach((log, i) => {
+      setTimeout(() => {
+        setReplayLogs(prev => [...prev, log]);
+      }, i * 1200);
+    });
+  };
+
   const handleTrigger = async (type: 'STANDARD' | 'LOW_DATA' | 'HIGH_CONF') => {
     setIsRunning(true);
     setReplayMode(false);
@@ -51,26 +63,23 @@ export default function DemoScreen() {
         }, 1000);
       }
     } catch (e) {
-      console.error(e);
-      setIsRunning(false);
+      // Backend unreachable — go straight to replay, don't show empty screen
+      console.warn('API failed, switching to replay mode:', e);
+      startReplay();
     }
   };
 
-  // Layer 2 safety net: if no logs arrive within 8s, stream pre-seeded replay
+  // Layer 2: if backend responds but logs don't arrive within 3s, replay
   useEffect(() => {
-    if (!isRunning) return;
+    if (!isRunning || replayMode) return;
     const timeout = setTimeout(() => {
       if (logs.length === 0) {
-        setReplayMode(true);
-        REPLAY_LOGS.forEach((log, i) => {
-          setTimeout(() => {
-            setReplayLogs(prev => [...prev, log]);
-          }, i * 1200);
-        });
+        startReplay();
       }
-    }, 8000);
+    }, 3000);
     return () => clearTimeout(timeout);
-  }, [isRunning, logs.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning, replayMode, logs.length]);
 
   // End the running state when final step appears
   useEffect(() => {
