@@ -188,7 +188,7 @@ export default function ConfidenceChart({ logs, isActive }: Props) {
             {/* Start / end labels */}
             {points.length > 1 && (
               <>
-                <text x={toX(0)} y={toY(points[0]) - 6} fontSize="8" fill="#6b7280" textAnchor="middle">
+                <text x={toX(0) + 6} y={toY(points[0]) - 8} fontSize="8" fill="#6b7280" textAnchor="start">
                   {(points[0] * 100).toFixed(0)}%
                 </text>
                 <text x={toX(points.length - 1)} y={toY(current) - 8} fontSize="9" fill={color} textAnchor="middle" fontWeight="bold">
