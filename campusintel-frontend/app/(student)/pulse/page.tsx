@@ -261,22 +261,20 @@ export default function CampusPulsePage() {
       nodeGroups.attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
     });
 
-    // Magnetic mouse tracking - nodes dynamically repel the cursor
+    // Magnetic mouse tracking - only LPU center hub attracts to mouse
     let mousePos = { x: cx, y: cy };
     let isMouseActive = false;
 
-    sim.force('repelMouse', () => {
+    sim.force('attractCenter', () => {
       if (!isMouseActive) return;
       nodesRef.current.forEach(n => {
-        const dx = n.x! - mousePos.x;
-        const dy = n.y! - mousePos.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const maxDist = 200; // Radius of magnetic repulsion
-
-        if (dist < maxDist && dist > 0) {
-          const force = (maxDist - dist) / maxDist * 1.5; 
-          n.vx! += (dx / dist) * force;
-          n.vy! += (dy / dist) * force;
+        if (n.id === 'lpu') {
+          const dx = mousePos.x - n.x!;
+          const dy = mousePos.y - n.y!;
+          
+          // Gentle spring attraction towards mouse
+          n.vx! += dx * 0.04;
+          n.vy! += dy * 0.04;
         }
       });
     });
