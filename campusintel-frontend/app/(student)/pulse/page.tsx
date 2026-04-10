@@ -261,8 +261,24 @@ export default function CampusPulsePage() {
       nodeGroups.attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
     });
 
+    // Subtle 3D Parallax on mouse move
+    svg.on('mousemove', (event) => {
+      const [mx, my] = d3.pointer(event);
+      // Base the movement off the center of the canvas
+      const dx = (mx - cx) * 0.05; 
+      const dy = (my - cy) * 0.05;
+      
+      // Node layer moves slightly more to create depth
+      nodeLayer.style('transform', `translate(${-dx * 1.5}px, ${-dy * 1.5}px)`);
+      arcLayer.style('transform', `translate(${-dx}px, ${-dy}px)`);
+      pulseLayer.style('transform', `translate(${-dx}px, ${-dy}px)`);
+    });
+
     // Cleanup
-    return () => { sim.stop(); };
+    return () => { 
+      sim.stop(); 
+      svg.on('mousemove', null); 
+    };
   }, []);
 
   // Animate a pulse along an arc
