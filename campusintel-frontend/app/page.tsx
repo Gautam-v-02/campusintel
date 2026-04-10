@@ -37,10 +37,10 @@ export default function LandingPage() {
             <Link href="/pulse" className="text-[#9b9bbb] hover:text-indigo-400 transition">Network</Link>
             <Link href="/demo" className="text-[#9b9bbb] hover:text-indigo-400 transition">Agent Trace</Link>
             <Link href="/debrief" className="text-[#9b9bbb] hover:text-emerald-400 transition">Submit Debrief</Link>
-            <Link href="/login" 
-              className="px-4 py-1.5 rounded-full border border-[#2a2a3d] text-[#c4c4d8] hover:bg-white/5 transition">
-              Sign In
-            </Link>
+            <div className="flex items-center gap-3 ml-2">
+              <Link href="/login" className="text-[#9b9bbb] hover:text-white transition">Sign In</Link>
+              <Link href="/onboarding" className="px-4 py-1.5 rounded-full bg-indigo-600 text-white hover:bg-indigo-500 transition font-medium">Get Started</Link>
+            </div>
           </div>
         </div>
       </nav>
@@ -249,12 +249,17 @@ export default function LandingPage() {
           </div>
 
           {/* Card 5 — Resume Parsing */}
-          <div className="bg-[#0a0a14] border border-[#1e1e30] hover:border-indigo-500/30 rounded-3xl p-8 transition-colors">
-            <div className="text-[11px] text-indigo-400 font-mono tracking-widest uppercase mb-4">04 // Resume AI</div>
-            <h3 className="text-2xl font-display text-white mb-3">Upload. Don't Type.</h3>
-            <p className="text-[#8b8b9f] leading-relaxed">
-              Student uploads a PDF resume. Gemini AI extracts a skills profile automatically — no forms, no onboarding friction.
-            </p>
+          <div className="bg-[#0a0a14] border border-[#1e1e30] hover:border-indigo-500/30 rounded-3xl p-8 transition-colors flex flex-col items-start justify-between">
+            <div>
+              <div className="text-[11px] text-indigo-400 font-mono tracking-widest uppercase mb-4">04 // Resume AI</div>
+              <h3 className="text-2xl font-display text-white mb-3">Upload. Don't Type.</h3>
+              <p className="text-[#8b8b9f] leading-relaxed mb-6">
+                Student uploads a PDF resume. Gemini AI extracts a skills profile automatically — no forms, no onboarding friction.
+              </p>
+            </div>
+            <Link href="/onboarding" className="text-sm font-semibold text-indigo-400 hover:text-indigo-300 transition inline-flex items-center gap-1.5">
+              Try Interactive Onboarding →
+            </Link>
           </div>
 
           {/* Card 6 — Debrief Loop */}
