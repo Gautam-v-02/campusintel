@@ -261,23 +261,37 @@ export default function CampusPulsePage() {
       nodeGroups.attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
     });
 
-    // Subtle 3D Parallax on mouse move
+    // Highly interactive tracking on mouse move
     svg.on('mousemove', (event) => {
       const [mx, my] = d3.pointer(event);
-      // Base the movement off the center of the canvas
-      const dx = (mx - cx) * 0.05; 
-      const dy = (my - cy) * 0.05;
+      const dx = (mx - cx); 
+      const dy = (my - cy);
       
-      // Node layer moves slightly more to create depth
-      nodeLayer.style('transform', `translate(${-dx * 1.5}px, ${-dy * 1.5}px)`);
-      arcLayer.style('transform', `translate(${-dx}px, ${-dy}px)`);
-      pulseLayer.style('transform', `translate(${-dx}px, ${-dy}px)`);
+      // 1. Shift the D3 gravity origin towards the mouse
+      sim.force('center', d3.forceCenter(cx + dx * 0.25, cy + dy * 0.25).strength(0.04));
+      sim.alphaTarget(0.1).restart(); // Keep physics flowing 
+      
+      // 2. Increase the parallax multiplier and make layers *follow* the mouse 
+      nodeLayer.style('transform', `translate(${dx * 0.15}px, ${dy * 0.15}px)`);
+      arcLayer.style('transform', `translate(${dx * 0.08}px, ${dy * 0.08}px)`);
+      pulseLayer.style('transform', `translate(${dx * 0.08}px, ${dy * 0.08}px)`);
+    });
+
+    svg.on('mouseleave', () => {
+      // Snap back to center
+      sim.force('center', d3.forceCenter(cx, cy).strength(0.05));
+      sim.alphaTarget(0.1).restart();
+      setTimeout(() => sim.alphaTarget(0), 1000);
+      nodeLayer.style('transform', `translate(0px, 0px)`);
+      arcLayer.style('transform', `translate(0px, 0px)`);
+      pulseLayer.style('transform', `translate(0px, 0px)`);
     });
 
     // Cleanup
     return () => { 
       sim.stop(); 
       svg.on('mousemove', null); 
+      svg.on('mouseleave', null);
     };
   }, []);
 
