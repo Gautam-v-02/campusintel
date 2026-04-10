@@ -6,7 +6,12 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    domains: ['logo.clearbit.com'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'logo.clearbit.com',
+      },
+    ],
   },
 };
 
