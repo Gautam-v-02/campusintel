@@ -215,7 +215,6 @@ export default function TpcDashboardPage() {
                 </table>
               </div>
             </>
-            </>
           ) : activeTab === '👥 Students' ? (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-both">
               <div>
