@@ -79,14 +79,16 @@ app.use((err, req, res, next) => {
 
 // ── Start server ──
 app.listen(PORT, () => {
-  console.log(`
+  const GROQ_KEY = process.env.GROQ_API_KEY || process.env.GROK_API_KEY;
+
+console.log(`
 ╔══════════════════════════════════════════════╗
-║   CampusIntel Backend — v2.0.0 (Grok)       ║
-║   Port: ${PORT}                                   ║
-║   Grok API: ${process.env.GROK_API_KEY ? '✓ Configured' : '✗ MISSING — add GROK_API_KEY'}  ║
-║   Supabase: ${process.env.SUPABASE_URL ? '✓ Configured' : '✗ MISSING'}             ║
+║   CampusIntel Backend — v2.0.0 (Groq)       ║
+║   Port: ${PORT.toString().padEnd(36)}║
+║   Groq API: ${(GROQ_KEY ? '✓ Configured' : '✗ MISSING').padEnd(34)}║
+║   Supabase: ${(process.env.SUPABASE_URL ? '✓ Configured' : '✗ MISSING').padEnd(34)}║
 ╚══════════════════════════════════════════════╝
-  `);
+`);
 });
 
 // ── Cron: Scan for upcoming drives every 30 minutes ──

@@ -1,15 +1,22 @@
-// src/lib/grok.js — xAI Grok client (OpenAI-compatible)
+// src/lib/grok.js — Groq client (OpenAI-compatible, Llama models)
 import OpenAI from 'openai';
 
+// Support both GROQ_API_KEY and GROK_API_KEY (legacy fallback)
+const GROQ_KEY = process.env.GROQ_API_KEY || process.env.GROK_API_KEY;
+
+if (!GROQ_KEY) {
+  console.error('[Groq] WARNING: Neither GROQ_API_KEY nor GROK_API_KEY is set. AI features will fail.');
+}
+
 const client = new OpenAI({
-  apiKey: process.env.GROK_API_KEY,
-  baseURL: 'https://api.x.ai/v1',
+  apiKey: GROQ_KEY,
+  baseURL: 'https://api.groq.com/openai/v1',
 });
 
-// Fast model for structured tasks
-export const GROK_FAST = 'grok-3-mini';
-// Full model for complex generation
-export const GROK_FULL = 'grok-3';
+// Fast model — llama-3.1-8b-instant (replaces grok-3-mini)
+export const GROK_FAST = 'llama-3.1-8b-instant';
+// Full model — llama-3.3-70b-versatile (replaces grok-3)
+export const GROK_FULL = 'llama-3.3-70b-versatile';
 
 /**
  * Generate a placement preparation brief using Grok
