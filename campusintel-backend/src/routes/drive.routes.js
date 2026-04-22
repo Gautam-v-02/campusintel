@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
 const { v4: uuidv4 } = require('uuid');
+const { requireAuth } = require('../middleware/auth.middleware');
 
 /**
  * GET /api/drives/:collegeId
@@ -9,18 +10,29 @@ const { v4: uuidv4 } = require('uuid');
  */
 router.get('/:collegeId', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // Pagination support: ?limit=20&offset=0
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const offset = parseInt(req.query.offset) || 0;
+
+    const { data, error, count } = await supabase
       .from('campus_drives')
       .select(`
         id, drive_date, registration_deadline, roles_offered,
         eligible_branches, min_cgpa, package_offered, status,
         company:companies(id, name, normalized_name, sector, website)
-      `)
+      `, { count: 'exact' })
       .eq('college_id', req.params.collegeId)
-      .order('drive_date', { ascending: true });
+      .order('drive_date', { ascending: true })
+      .range(offset, offset + limit - 1);
 
     if (error) throw error;
-    res.json(data || []);
+    res.json({
+      data: data || [],
+      total: count || 0,
+      limit,
+      offset,
+      has_more: offset + limit < (count || 0),
+    });
   } catch (err) {
     console.error('[Drives] GET list failed:', err.message);
     res.status(500).json({ error: err.message });
@@ -72,7 +84,7 @@ router.get('/:driveId/detail', async (req, res) => {
  * Register a student for a drive
  * Body: { studentId }
  */
-router.post('/:driveId/register', async (req, res) => {
+router.post('/:driveId/register', requireAuth, async (req, res) => {
   const { driveId } = req.params;
   const { studentId } = req.body;
 

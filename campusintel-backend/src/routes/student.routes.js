@@ -4,6 +4,7 @@ const supabase = require('../config/supabase');
 const pdfParse = require('pdf-parse');
 const claudeService = require('../services/claude.service');
 const { v4: uuidv4 } = require('uuid');
+const { signToken, requireAuth } = require('../middleware/auth.middleware');
 
 // ── Smart keyword-based skill extractor ─────────────────────────────────────
 // Used as fallback when Gemini API is unavailable.
@@ -136,12 +137,13 @@ router.post('/register', async (req, res) => {
     .single();
 
   if (existing) {
-    // Return existing user — treat as login
+    const token = signToken(existing);
     console.log(`[Register] Email already exists, returning existing user: ${existing.id}`);
     return res.json({
       success: true,
       already_exists: true,
       student: existing,
+      token,
       message: 'Account already exists. Signed in automatically.',
     });
   }
@@ -174,11 +176,13 @@ router.post('/register', async (req, res) => {
     return res.status(500).json({ error: insertErr.message });
   }
 
+  const token = signToken(newUser);
   console.log(`[Register] ✅ New student created: ${studentId} — ${name} <${normalizedEmail}>`);
   res.json({
     success: true,
     already_exists: false,
     student: newUser,
+    token,
     message: 'Account created successfully!',
   });
 });
@@ -210,10 +214,12 @@ router.post('/login', async (req, res) => {
     });
   }
 
+  const token = signToken(user);
   console.log(`[Login] ✅ ${user.name} signed in (${user.id})`);
   res.json({
     success: true,
     student: user,
+    token,
     message: `Welcome back, ${user.name}!`,
   });
 });
@@ -346,13 +352,22 @@ Example output:
 
 /**
  * GET /api/student/:studentId
- * Fetch student profile
+ * Fetch student profile (requires auth — students can only view their own)
  */
-router.get('/:studentId', async (req, res) => {
+router.get('/:studentId', requireAuth, async (req, res) => {
+  // Students can only fetch their own profile unless they are TPC admin
+  const requestedId = req.params.studentId;
+  const callerId = req.user?.id;
+  const callerRole = req.user?.role;
+
+  if (callerId !== requestedId && callerRole !== 'tpc_admin' && callerRole !== 'super_admin') {
+    return res.status(403).json({ error: 'Access denied. You can only view your own profile.' });
+  }
+
   const { data, error } = await supabase
     .from('users')
     .select('id, name, email, branch, cgpa, batch_year, college_id, current_state, confidence_score, inferred_skills, resume_text, updated_at')
-    .eq('id', req.params.studentId)
+    .eq('id', requestedId)
     .single();
 
   if (error) return res.status(404).json({ error: 'Student not found.' });

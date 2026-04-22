@@ -1,10 +1,11 @@
 /**
  * lib/auth.ts
  * Centralised auth state using localStorage.
- * Stores the full student object so pages can read profile without extra API calls.
+ * Stores the full student object + JWT token.
  */
 
 const STUDENT_KEY = 'ci_student';
+const TOKEN_KEY = 'ci_token';
 
 export interface StudentProfile {
   id: string;
@@ -21,11 +22,11 @@ export interface StudentProfile {
   updated_at?: string;
 }
 
-/** Store student profile after login/register */
-export function setStudent(student: StudentProfile): void {
+/** Store student profile + JWT token after login/register */
+export function setStudent(student: StudentProfile, token?: string): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(STUDENT_KEY, JSON.stringify(student));
-  // Notify any listeners (e.g. dashboard) that profile changed
+  if (token) localStorage.setItem(TOKEN_KEY, token);
   window.dispatchEvent(new CustomEvent('ci:profile-updated', { detail: student }));
 }
 
@@ -41,6 +42,12 @@ export function getStudent(): StudentProfile | null {
   }
 }
 
+/** Get stored JWT token */
+export function getToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
+
 /** Get just the student ID */
 export function getStudentId(): string | null {
   return getStudent()?.id ?? null;
@@ -53,19 +60,21 @@ export function getCollegeId(): string {
 
 /** Is the user currently logged in? */
 export function isLoggedIn(): boolean {
-  return getStudent() !== null;
+  return getStudent() !== null && getToken() !== null;
 }
 
 /** Update stored profile fields (e.g. after resume upload) */
 export function updateStudentProfile(updates: Partial<StudentProfile>): void {
   const current = getStudent();
   if (!current) return;
-  setStudent({ ...current, ...updates }); // setStudent already dispatches the event
+  const token = getToken() ?? undefined;
+  setStudent({ ...current, ...updates }, token);
 }
 
-/** Log out — clear local storage and redirect */
+/** Log out — clear localStorage and redirect */
 export function logout(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(STUDENT_KEY);
+  localStorage.removeItem(TOKEN_KEY);
   window.location.href = '/login';
 }

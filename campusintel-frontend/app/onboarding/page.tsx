@@ -44,7 +44,7 @@ export default function OnboardingPage() {
       });
 
       if (res.success && res.student) {
-        setStudent(res.student);
+        setStudent(res.student, res.token);
         setStudentId(res.student.id);
         setStatus('idle');
         setStep('resume');

@@ -62,8 +62,10 @@ export default function DebriefPage() {
     const load = async () => {
       try {
         const collegeId = stored?.college_id || 'college-lpu-001';
-        const data = await api.getDebriefs(collegeId, 'company-google-001');
-        if (Array.isArray(data)) setRecentDebriefs(data.slice(0, 10));
+        const payload = await api.getDebriefs(collegeId, 'company-google-001');
+        // Handle both flat array and paginated { data: [] } shape
+        const list = Array.isArray(payload) ? payload : (payload?.data || []);
+        if (Array.isArray(list)) setRecentDebriefs(list.slice(0, 10));
       } catch (e) {
         console.warn('[Debrief feed] failed to load:', e);
       } finally {
@@ -134,7 +136,8 @@ export default function DebriefPage() {
 
         // Reload the feed
         const updated = await api.getDebriefs(stored.college_id || 'college-lpu-001', 'company-google-001');
-        if (Array.isArray(updated)) setRecentDebriefs(updated.slice(0, 10));
+        const updatedList = Array.isArray(updated) ? updated : (updated?.data || []);
+        if (Array.isArray(updatedList)) setRecentDebriefs(updatedList.slice(0, 10));
       } else {
         setErrorMsg(res.error || 'Submission failed.');
         setStatus('error');

@@ -3,13 +3,13 @@ const router = express.Router();
 const supabase = require('../config/supabase');
 const { v4: uuidv4 } = require('uuid');
 const claudeService = require('../services/claude.service');
+const { requireAuth } = require('../middleware/auth.middleware');
 
 /**
  * POST /api/debriefs
- * Submit a new interview debrief for a specific drive.
- * After saving, re-synthesizes the college_company_intel for that company.
+ * Submit a new interview debrief. Requires authentication.
  */
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const {
     driveId,
     collegeId,
@@ -164,19 +164,29 @@ Include up to 6 topics, ordered by frequency.`;
 /**
  * GET /api/debriefs/:collegeId/:companyId
  * Fetch all verified debriefs for a given college/company pair.
+ * Supports pagination: ?limit=30&offset=0
  */
 router.get('/:collegeId/:companyId', async (req, res) => {
-  const { data, error } = await supabase
+  const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+  const offset = parseInt(req.query.offset) || 0;
+
+  const { data, error, count } = await supabase
     .from('interview_debriefs')
-    .select('id, round_type, topics_covered, outcome, difficulty_rating, created_at')
+    .select('id, round_type, topics_covered, outcome, difficulty_rating, created_at', { count: 'exact' })
     .eq('college_id', req.params.collegeId)
     .eq('company_id', req.params.companyId)
     .eq('is_verified', true)
     .order('created_at', { ascending: false })
-    .limit(30);
+    .range(offset, offset + limit - 1);
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data || []);
+  res.json({
+    data: data || [],
+    total: count || 0,
+    limit,
+    offset,
+    has_more: offset + limit < (count || 0),
+  });
 });
 
 module.exports = router;

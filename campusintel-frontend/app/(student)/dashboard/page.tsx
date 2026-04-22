@@ -135,8 +135,11 @@ export default function DashboardPage() {
         setStudentData(stored);
       }
 
-      if (drivesRes.status === 'fulfilled' && Array.isArray(drivesRes.value)) {
-        setDrives(drivesRes.value.slice(0, 4));
+      if (drivesRes.status === 'fulfilled') {
+        // API now returns { data: [], total, limit, offset } — handle both shapes
+        const drivesPayload = drivesRes.value;
+        const drivesList = Array.isArray(drivesPayload) ? drivesPayload : (drivesPayload?.data || []);
+        setDrives(drivesList.slice(0, 4));
       }
 
       if (briefRes.status === 'fulfilled' && Array.isArray(briefRes.value)) {

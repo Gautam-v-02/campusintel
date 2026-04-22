@@ -1,96 +1,86 @@
-const supabase = require('../config/supabase');
+// src/agent/learner.js — Epsilon-Greedy RL Weight Updater
+import supabase from '../lib/supabase.js';
 
 /**
- * Called after TPC records an interview outcome.
- * Updates strategy_weights — this is the learning loop.
+ * Called when a student outcome is recorded.
+ * Updates strategy weights via incremental win-rate calculation.
  */
-async function updateWeights(studentId, driveId, outcome) {
-  const isSuccess = outcome === 'selected';
-
-  // 1. Find which strategy was used from agent_logs
+export async function updateStrategyWeights({ studentId, driveId, outcome }) {
+  // 1. Find what strategy was used for this student
   const { data: logs } = await supabase
     .from('agent_logs')
-    .select('output, input')
+    .select('decision_made, input')
     .eq('student_id', studentId)
     .eq('drive_id', driveId)
     .eq('step_name', 'SELECT_STRATEGY')
     .order('started_at', { ascending: false })
     .limit(1);
 
-  const strategyLog = logs?.[0];
-  const strategyName = strategyLog?.output?.name;
-  const profileType = strategyLog?.input?.profile_type;
+  if (!logs || logs.length === 0) return;
 
-  if (!strategyName || !profileType) {
-    console.warn('[Learner] Could not find strategy from logs for:', studentId, driveId);
-    return { updated: false, reason: 'no_strategy_log_found' };
-  }
+  const usedStrategy = logs[0].decision_made;
 
-  // 2. Get student's college_id and drive's company_id
-  const { data: student } = await supabase.from('users').select('college_id').eq('id', studentId).single();
-  const { data: drive } = await supabase.from('campus_drives').select('company_id').eq('id', driveId).single();
+  // 2. Get student for college + company context
+  const { data: student } = await supabase
+    .from('users')
+    .select('college_id, confidence_score')
+    .eq('id', studentId)
+    .single();
 
-  if (!student || !drive) return { updated: false, reason: 'data_not_found' };
+  if (!student) return;
 
-  const collegeId = student.college_id;
-  const companyId = drive.company_id;
+  const { data: reg } = await supabase
+    .from('student_registrations')
+    .select('*, campus_drives!inner(company_id)')
+    .eq('student_id', studentId)
+    .eq('drive_id', driveId)
+    .single();
 
-  // 3. Fetch current weights
-  const { data: current } = await supabase
+  if (!reg) return;
+
+  const companyId = reg.campus_drives?.company_id;
+  const score = student.confidence_score || 0.5;
+  const profileType =
+    score >= 0.7 ? 'HIGH_CONFIDENCE' : score >= 0.4 ? 'MEDIUM_CONFIDENCE' : 'LOW_CONFIDENCE';
+
+  // 3. Upsert strategy weight
+  const { data: existing } = await supabase
     .from('strategy_weights')
     .select('*')
-    .eq('college_id', collegeId)
+    .eq('college_id', student.college_id)
     .eq('company_id', companyId)
-    .eq('strategy', strategyName)
+    .eq('strategy', usedStrategy)
     .eq('student_profile_type', profileType)
     .single();
 
-  const timesUsed = (current?.times_used || 0) + 1;
-  const timesSuccessful = (current?.times_successful || 0) + (isSuccess ? 1 : 0);
-  const winRate = parseFloat((timesSuccessful / timesUsed).toFixed(3));
-  // Weight = win_rate * 3, clamped to [0.1, 5.0]
-  const weight = parseFloat(Math.min(5.0, Math.max(0.1, winRate * 3)).toFixed(4));
+  const isSuccess = outcome === 'selected';
+  const timesUsed = (existing?.times_used || 0) + 1;
+  const timesSuccessful = (existing?.times_successful || 0) + (isSuccess ? 1 : 0);
+  const winRate = timesSuccessful / timesUsed;
 
-  // 4. Upsert the weight
-  const { error } = await supabase.from('strategy_weights').upsert({
-    college_id: collegeId,
-    company_id: companyId,
-    strategy: strategyName,
-    student_profile_type: profileType,
-    times_used: timesUsed,
-    times_successful: timesSuccessful,
-    win_rate: winRate,
-    weight,
-    last_updated: new Date().toISOString(),
-  }, { onConflict: 'college_id,company_id,strategy,student_profile_type' });
+  // Exponential moving average for weight (recent outcomes matter more)
+  const alpha = 0.3; // learning rate
+  const currentWeight = existing?.weight || 1.0;
+  const newWeight = currentWeight * (1 - alpha) + (isSuccess ? 1.5 : 0.5) * alpha;
 
-  if (error) {
-    console.error('[Learner] Failed to update weights:', error.message);
-    return { updated: false, error: error.message };
-  }
+  await supabase
+    .from('strategy_weights')
+    .upsert(
+      {
+        college_id: student.college_id,
+        company_id: companyId,
+        strategy: usedStrategy,
+        student_profile_type: profileType,
+        times_used: timesUsed,
+        times_successful: timesSuccessful,
+        win_rate: parseFloat(winRate.toFixed(3)),
+        weight: parseFloat(newWeight.toFixed(4)),
+        last_updated: new Date().toISOString(),
+      },
+      { onConflict: 'college_id,company_id,strategy,student_profile_type' }
+    );
 
-  // 5. Update student state to POST_INTERVIEW
-  await supabase.from('users')
-    .update({ current_state: 'POST_INTERVIEW', updated_at: new Date().toISOString() })
-    .eq('id', studentId);
-
-  // 6. Update registration status
-  await supabase.from('student_registrations')
-    .update({ status: outcome, outcome_recorded_at: new Date().toISOString() })
-    .eq('student_id', studentId)
-    .eq('drive_id', driveId);
-
-  console.log(`[Learner] ✅ Updated ${strategyName}/${profileType}: weight ${current?.weight} → ${weight} (win_rate: ${winRate})`);
-
-  return {
-    updated: true,
-    strategy: strategyName,
-    profile_type: profileType,
-    old_weight: current?.weight || 1.0,
-    new_weight: weight,
-    win_rate: winRate,
-    times_used: timesUsed,
-  };
+  console.log(
+    `[Learner] Updated ${usedStrategy} for ${profileType}: win_rate=${winRate.toFixed(2)} weight=${newWeight.toFixed(2)}`
+  );
 }
-
-module.exports = { updateWeights };

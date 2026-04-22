@@ -1,88 +1,151 @@
-require('dotenv').config();
+// src/index.js — CampusIntel Backend Server
+import express from 'express';
+import cors from 'cors';
+import cron from 'node-cron';
+import supabase from './lib/supabase.js';
+import { runAgentLoop } from './agent/reactor.js';
 
-const express = require('express');
-const cors = require('cors');
-const tenantMiddleware = require('./middleware/tenant.middleware');
-const { startScanner } = require('./agent/scanner.job');
-const supabase = require('./config/supabase');
+// Routes
+import agentRoutes from './routes/agent.js';
+import studentRoutes from './routes/student.js';
+import debriefRoutes from './routes/debriefs.js';
+import driveRoutes from './routes/drives.js';
+import tpcRoutes from './routes/tpc.js';
 
 const app = express();
+const PORT = process.env.PORT || 3001;
 
-const corsOptions = {
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-college-id'],
-};
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Handle ALL preflight requests
+// ── Middleware ──
+app.use(
+  cors({
+    origin: [
+      process.env.FRONTEND_URL || 'http://localhost:3000',
+      'https://campusintel.vercel.app',
+      'https://campusintel-tan.vercel.app',
+      /\.vercel\.app$/,
+    ],
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(tenantMiddleware);
+app.use(express.urlencoded({ extended: true }));
 
-// ── Health check ──────────────────────────────────────────────
+// Request logging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
+
+// ── Routes ──
+app.use('/api/agent', agentRoutes);
+app.use('/api/student', studentRoutes);
+app.use('/api/debriefs', debriefRoutes);
+app.use('/api/drives', driveRoutes);
+app.use('/api/tpc', tpcRoutes);
+
+// Health check
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    service: 'CampusIntel Backend',
-    dev_mode: process.env.CLAUDE_MOCK === 'true',
-    time: new Date().toISOString(),
+    service: 'campusintel-backend',
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV || 'development',
+    grok: process.env.GROK_API_KEY ? '✓ configured' : '✗ MISSING',
+    supabase: process.env.SUPABASE_URL ? '✓ configured' : '✗ MISSING',
   });
 });
 
-// ── Status check (shows env + recent session logs) ────────────
+// Status — recent agent logs
 app.get('/status', async (req, res) => {
-  const result = {
-    status: 'ok',
-    service: 'CampusIntel Backend',
-    time: new Date().toISOString(),
-    env: {
-      dev_mode: process.env.CLAUDE_MOCK === 'true',
-      gemini_key_set: !!(process.env.GEMINI_API_KEY || process.env.MODELSLAB_API_KEY || process.env.NVIDIA_API_KEY),
-      supabase_url_set: !!process.env.SUPABASE_URL,
-      port: process.env.PORT || 3001,
-    },
-    supabase: { connected: false, error: null },
-    recent_sessions: [],
-  };
-
   try {
     const { data, error } = await supabase
       .from('agent_logs')
-      .select('session_id, student_id, college_id, step_name, status, duration_ms, started_at')
+      .select('session_id, student_id, step_name, status, duration_ms, started_at')
       .order('started_at', { ascending: false })
       .limit(10);
 
     if (error) throw error;
-
-    result.supabase.connected = true;
-    result.recent_sessions = data || [];
+    res.json({ status: 'ok', recent_sessions: data || [] });
   } catch (err) {
-    result.supabase.error = err.message;
+    res.status(500).json({ error: err.message });
   }
-
-  res.json(result);
 });
 
-// ── Routes (added as we build) ────────────────────────────────
-app.use('/api/agent', require('./routes/agent.routes'));
-app.use('/api/tpc', require('./routes/tpc.routes'));
-app.use('/api/drives', require('./routes/drive.routes'));
-app.use('/api/debriefs', require('./routes/debrief.routes'));
-app.use('/api/student', require('./routes/student.routes'));
+// 404
+app.use((req, res) => {
+  res.status(404).json({ error: `Route ${req.path} not found` });
+});
 
-// ── Global error handler ──────────────────────────────────────
+// Error handler
 app.use((err, req, res, next) => {
-  console.error('[Error]', err.message);
-  res.status(500).json({ error: err.message });
+  console.error('[Server] Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error', message: err.message });
 });
 
-const PORT = process.env.PORT || 3001;
+// ── Start server ──
 app.listen(PORT, () => {
-  console.log(`\n🚀 CampusIntel backend running on port ${PORT}`);
-  console.log(`   DEV_MODE / CLAUDE_MOCK: ${process.env.CLAUDE_MOCK === 'true' ? '✅ ON (no tokens burned)' : '❌ OFF (real Claude calls)'}`);
-  console.log(`   Health: http://localhost:${PORT}/health\n`);
-
-  // Start the background scanner job (runs every hour)
-  startScanner('0 * * * *');
+  console.log(`
+╔══════════════════════════════════════════════╗
+║   CampusIntel Backend — v2.0.0 (Grok)       ║
+║   Port: ${PORT}                                   ║
+║   Grok API: ${process.env.GROK_API_KEY ? '✓ Configured' : '✗ MISSING — add GROK_API_KEY'}  ║
+║   Supabase: ${process.env.SUPABASE_URL ? '✓ Configured' : '✗ MISSING'}             ║
+╚══════════════════════════════════════════════╝
+  `);
 });
+
+// ── Cron: Scan for upcoming drives every 30 minutes ──
+cron.schedule('*/30 * * * *', async () => {
+  console.log('[Cron] Scanning upcoming drives...');
+  try {
+    // Find drives happening within next 72 hours
+    const windowEnd = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+    const { data: drives } = await supabase
+      .from('campus_drives')
+      .select('id, college_id, company_id')
+      .eq('status', 'upcoming')
+      .lte('drive_date', windowEnd)
+      .gte('drive_date', new Date().toISOString());
+
+    if (!drives || drives.length === 0) return;
+
+    for (const drive of drives) {
+      // Get unprocessed registrations for this drive
+      const { data: regs } = await supabase
+        .from('student_registrations')
+        .select('student_id')
+        .eq('drive_id', drive.id)
+        .eq('status', 'registered');
+
+      if (!regs) continue;
+
+      // Check who hasn't had agent run yet
+      for (const reg of regs.slice(0, 10)) {
+        // Limit to 10 per cron run
+        const { count } = await supabase
+          .from('agent_logs')
+          .select('id', { count: 'exact', head: true })
+          .eq('student_id', reg.student_id)
+          .eq('drive_id', drive.id);
+
+        if (!count || count === 0) {
+          console.log(
+            `[Cron] Triggering agent for student=${reg.student_id} drive=${drive.id}`
+          );
+          runAgentLoop({
+            studentId: reg.student_id,
+            driveId: drive.id,
+            collegeId: drive.college_id,
+          }).catch((err) => console.error('[Cron] Agent error:', err.message));
+
+          // Small delay between runs
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Cron] Scan error:', err.message);
+  }
+});
+
+export default app;

@@ -38,7 +38,7 @@ export default function LoginPage() {
       const res = await api.login(trimmed);
 
       if (res.success && res.student) {
-        setStudent(res.student);
+        setStudent(res.student, res.token);
         routeAfterLogin(res.student);
       } else {
         setErrorMsg(res.error || 'No account found. Please register first.');

@@ -1,421 +1,658 @@
-const { v4: uuidv4 } = require('uuid');
-const supabase = require('../config/supabase');
-const { logStep } = require('./logger');
+// src/agent/reactor.js — 9-Step ReAct Agent Loop
+import { v4 as uuidv4 } from 'uuid';
+import supabase from '../lib/supabase.js';
+import {
+  generateBrief,
+  generateAssessment,
+  GROK_FAST,
+} from '../lib/grok.js';
 
-// Tools
-const queryLocalDB = require('./tools/queryLocalDB');
-const queryGlobalDB = require('./tools/queryGlobalDB');
-const scrapeCompanyIntel = require('./tools/scrapeCompanyIntel');
-const generateBrief = require('./tools/generateBrief');
-const generateAssessment = require('./tools/generateAssessment');
-const scheduleSession = require('./tools/scheduleSession');
-const alertTPC = require('./tools/alertTPC');
-const coldStartProbe = require('./tools/coldStartProbe');
+// ── Log a step to Supabase (triggers Realtime on frontend) ──
+async function logStep({
+  sessionId,
+  studentId,
+  collegeId,
+  driveId,
+  stepNumber,
+  stepName,
+  input,
+  output,
+  decisionBasis,
+  decisionMade,
+  durationMs,
+  status,
+  errorMessage,
+}) {
+  const { error } = await supabase.from('agent_logs').insert({
+    session_id: sessionId,
+    student_id: studentId,
+    college_id: collegeId,
+    drive_id: driveId,
+    step_number: stepNumber,
+    step_name: stepName,
+    input: input || {},
+    output: output || {},
+    decision_basis: decisionBasis,
+    decision_made: decisionMade,
+    duration_ms: durationMs,
+    started_at: new Date().toISOString(),
+    status,
+    error_message: errorMessage || null,
+  });
+  if (error) console.error('[Agent] Log step error:', error.message);
+}
 
-// ── Thresholds (change these in env to alter agent behavior live on stage) ──
-const LOCAL_THRESHOLD = parseInt(process.env.LOCAL_THRESHOLD || '5');
-const GLOBAL_THRESHOLD = parseInt(process.env.GLOBAL_THRESHOLD || '10');
-const READINESS_THRESHOLD = parseFloat(process.env.READINESS_THRESHOLD || '0.65');
-const CRITICAL_GAP_THRESHOLD = parseFloat(process.env.CRITICAL_GAP_THRESHOLD || '0.3');
-const TPC_ALERT_MIN_STUDENTS = parseInt(process.env.TPC_ALERT_MIN_STUDENTS || '3');
-
-/**
- * Compute readiness score and identify gaps.
- * readiness = sum(student_level * topic_frequency) / sum(topic_frequency)
- */
-function assessReadiness(inferredSkills, topTopics) {
-  if (!topTopics || topTopics.length === 0) {
-    return { score: 0.5, gaps: [], profileType: 'NO_DATA' };
-  }
-
+// ── Calculate readiness score ──
+function calculateReadiness(studentSkills, topTopics) {
+  if (!topTopics || topTopics.length === 0) return 0.5;
+  let weightedSum = 0;
   let totalWeight = 0;
-  let coveredWeight = 0;
-  const gaps = [];
-
-  topTopics.forEach(({ topic, frequency }) => {
-    const freq = frequency || 0.5;
-    const studentLevel = inferredSkills[topic] ?? inferredSkills[topic?.split('_')[0]] ?? 0.5;
+  for (const topic of topTopics) {
+    const skillKey = topic.topic?.toLowerCase().replace(/ /g, '_');
+    const studentLevel = studentSkills?.[skillKey] || 0.3;
+    const freq = topic.frequency || 0.5;
+    weightedSum += studentLevel * freq;
     totalWeight += freq;
-    coveredWeight += studentLevel * freq;
-
-    if (studentLevel < CRITICAL_GAP_THRESHOLD) {
-      gaps.push({ topic, student_level: studentLevel, severity: 'CRITICAL', frequency: freq });
-    } else if (studentLevel < 0.5) {
-      gaps.push({ topic, student_level: studentLevel, severity: 'MODERATE', frequency: freq });
-    }
-  });
-
-  const score = totalWeight > 0 ? parseFloat((coveredWeight / totalWeight).toFixed(2)) : 0.5;
-  const profileType =
-    score >= 0.7 ? 'HIGH_CONFIDENCE' :
-    score >= 0.4 ? 'MEDIUM_CONFIDENCE' :
-    'LOW_CONFIDENCE';
-
-  return { score, gaps, profileType };
+  }
+  return totalWeight > 0 ? Math.min(1, weightedSum / totalWeight) : 0.3;
 }
 
-/**
- * Blend local + global intel (70/30 weighting).
- */
-function blendIntelligence(local, global_) {
-  const merged = [...(local.top_topics || [])];
-  (global_.top_topics || []).forEach(gt => {
-    if (!merged.find(lt => lt.topic === gt.topic)) merged.push(gt);
-  });
-
-  return {
-    top_topics: merged.slice(0, 6),
-    debrief_count: (local.debrief_count || 0) + (global_.debrief_count || 0),
-    confidence_level: 'MEDIUM',
-    source: 'BLENDED',
-    local_count: local.debrief_count || 0,
-    global_count: global_.debrief_count || 0,
-  };
-}
-
-/**
- * Get best strategy from strategy_weights table.
- * Falls back to defaults if no weights exist.
- */
+// ── Select strategy via epsilon-greedy weights ──
 async function selectStrategy(collegeId, companyId, profileType) {
   const { data: weights } = await supabase
     .from('strategy_weights')
-    .select('strategy, weight')
+    .select('*')
     .eq('college_id', collegeId)
     .eq('company_id', companyId)
     .eq('student_profile_type', profileType)
     .order('weight', { ascending: false });
 
-  if (weights && weights.length > 0) {
-    return { name: weights[0].strategy, weight: weights[0].weight, source: 'STRATEGY_WEIGHTS_TABLE' };
+  if (!weights || weights.length === 0) {
+    // Default strategies by profile type
+    const defaults = {
+      HIGH_CONFIDENCE: 'BRIEF_ONLY',
+      MEDIUM_CONFIDENCE: 'BRIEF_ASSESS',
+      LOW_CONFIDENCE: 'BRIEF_ASSESS_SESSION',
+      NO_DATA: 'BRIEF_ASSESS_SESSION',
+    };
+    return defaults[profileType] || 'BRIEF_ASSESS';
   }
 
-  // Default fallback if no weights exist
-  const defaults = {
-    HIGH_CONFIDENCE: 'BRIEF_ONLY',
-    MEDIUM_CONFIDENCE: 'BRIEF_ASSESS',
-    LOW_CONFIDENCE: 'BRIEF_ASSESS_SESSION',
-    NO_DATA: 'BRIEF_ASSESS_SESSION',
-  };
-  return { name: defaults[profileType] || 'BRIEF_ASSESS_SESSION', weight: 1.0, source: 'DEFAULT_FALLBACK' };
+  // Epsilon-greedy: 10% exploration, 90% exploitation
+  const epsilon = 0.1;
+  if (Math.random() < epsilon) {
+    return weights[Math.floor(Math.random() * weights.length)].strategy;
+  }
+  return weights[0].strategy;
 }
 
-// ── Main Agent Loop ────────────────────────────────────────────────────────
-async function runAgentLoop(studentId, driveId, forceSessionId = null) {
-  const sessionId = forceSessionId || uuidv4();
-  console.log(`\n[Reactor] Starting agent loop | session=${sessionId} | student=${studentId}`);
+// ── Synthesize intel from debriefs ──
+async function synthesizeIntel(collegeId, companyId) {
+  const { data: debriefs } = await supabase
+    .from('interview_debriefs')
+    .select('*')
+    .eq('college_id', collegeId)
+    .eq('company_id', companyId)
+    .eq('is_verified', true)
+    .order('created_at', { ascending: false })
+    .limit(50);
 
-  let stepNum = 0;
-  const ctx = { sessionId, studentId, driveId, collegeId: null };
+  if (!debriefs || debriefs.length === 0) return null;
+
+  // Count topic frequencies
+  const topicCounts = {};
+  let totalRounds = 0;
+  let selectedCount = 0;
+
+  for (const d of debriefs) {
+    totalRounds++;
+    if (d.outcome === 'selected') selectedCount++;
+
+    const topics = d.extracted_topics?.technical || d.topics_covered || [];
+    for (const topic of topics) {
+      topicCounts[topic] = (topicCounts[topic] || 0) + 1;
+    }
+  }
+
+  const topTopics = Object.entries(topicCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 8)
+    .map(([topic, count], idx) => ({
+      topic,
+      frequency: count / debriefs.length,
+      priority: idx + 1,
+    }));
+
+  return {
+    debrief_count: debriefs.length,
+    local_debrief_count: debriefs.length,
+    top_topics: topTopics,
+    selection_rate: selectedCount / totalRounds,
+    confidence_level:
+      debriefs.length >= 10 ? 'HIGH' : debriefs.length >= 5 ? 'MEDIUM' : 'LOW',
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  MAIN AGENT LOOP
+// ══════════════════════════════════════════════════════════════
+export async function runAgentLoop({ studentId, driveId, collegeId }) {
+  const sessionId = uuidv4();
+  let stepNumber = 0;
+  const t = () => Date.now();
+
+  console.log(
+    `[Agent] Starting loop | session=${sessionId} student=${studentId} drive=${driveId}`
+  );
+
+  // ── STEP 1: OBSERVE_PROFILE ──────────────────────────────────
+  stepNumber++;
+  let stepStart = t();
+  let student, drive;
 
   try {
-    // ─────────────────────────────────────────
-    // STEP 1: OBSERVE_PROFILE
-    // ─────────────────────────────────────────
-    stepNum = 1;
-    let t = new Date();
-
     const [studentRes, driveRes] = await Promise.all([
-      supabase.from('users').select('*').eq('id', studentId).single(),
-      supabase.from('campus_drives')
-        .select('*, company:companies(*)')
-        .eq('id', driveId).single(),
+      supabase
+        .from('users')
+        .select('*, colleges(name,short_name)')
+        .eq('id', studentId)
+        .single(),
+      supabase
+        .from('campus_drives')
+        .select('*, companies(name,normalized_name,website)')
+        .eq('id', driveId)
+        .single(),
     ]);
 
-    const student = studentRes.data;
-    const drive = driveRes.data;
+    if (studentRes.error || !studentRes.data)
+      throw new Error('Student not found: ' + studentId);
+    if (driveRes.error || !driveRes.data)
+      throw new Error('Drive not found: ' + driveId);
 
-    if (!student) throw new Error(`Student not found: ${studentId}`);
-    if (!drive) throw new Error(`Drive not found: ${driveId}`);
-
-    ctx.collegeId = student.college_id;
-    const company = drive.company;
-    const daysLeft = Math.ceil((new Date(drive.drive_date) - new Date()) / (1000 * 60 * 60 * 24));
-
-    await logStep({
-      ...ctx, stepNumber: stepNum, stepName: 'OBSERVE_PROFILE',
-      input: { studentId, driveId },
-      output: { student_name: student.name, company: company.name, days_left: daysLeft, current_state: student.current_state },
-      decisionBasis: `Student: ${student.name} | Company: ${company.name} | ${daysLeft} days remaining`,
-      decisionMade: 'CONTINUE',
-      startedAt: t, status: 'success',
-    });
-
-    // ─────────────────────────────────────────
-    // STEP 2: COLD START CHECK
-    // ─────────────────────────────────────────
-    stepNum = 2;
-    t = new Date();
-    const hasSkillData = student.inferred_skills && Object.keys(student.inferred_skills).length > 0;
-    const hasResume = !!student.resume_text;
-
-    if (!hasSkillData && !hasResume) {
-      const probeResult = await coldStartProbe.execute(student);
-      await logStep({
-        ...ctx, stepNumber: stepNum, stepName: 'COLD_START_DETECTED',
-        input: { has_skills: hasSkillData, has_resume: hasResume },
-        output: probeResult,
-        decisionBasis: 'No skill data and no resume. Cannot assess readiness accurately.',
-        decisionMade: 'COLD_START_PROBE_SENT',
-        startedAt: t, status: 'success',
-      });
-      return { sessionId, outcome: 'cold_start_probe_sent' };
-    }
-
-    await logStep({
-      ...ctx, stepNumber: stepNum, stepName: 'COLD_START_DETECTED',
-      input: { has_skills: hasSkillData, has_resume: hasResume },
-      output: { verdict: 'sufficient_data' },
-      decisionBasis: `Has skill data: ${hasSkillData}, has resume: ${hasResume}`,
-      decisionMade: 'SKIP_COLD_START',
-      startedAt: t, status: 'skipped',
-    });
-
-    // ─────────────────────────────────────────
-    // STEP 3: QUERY LOCAL DB
-    // ─────────────────────────────────────────
-    stepNum = 3;
-    t = new Date();
-    const localIntel = await queryLocalDB.execute(student.college_id, company.id);
-    const localSufficient = localIntel.debrief_count >= LOCAL_THRESHOLD;
-
-    await logStep({
-      ...ctx, stepNumber: stepNum, stepName: 'QUERY_LOCAL_DB',
-      input: { college_id: student.college_id, company_id: company.id, threshold: LOCAL_THRESHOLD },
-      output: localIntel,
-      decisionBasis: `Found ${localIntel.debrief_count} local debriefs. Threshold is ${LOCAL_THRESHOLD}.`,
-      decisionMade: localSufficient ? 'USE_LOCAL_DATA' : 'NEED_SUPPLEMENTAL',
-      startedAt: t, status: 'success',
-    });
-
-    // ─────────────────────────────────────────
-    // STEP 4: QUERY GLOBAL DB (conditional)
-    // ─────────────────────────────────────────
-    stepNum = 4;
-    t = new Date();
-    let finalIntel = { ...localIntel, company_name: company.name };
-
-    if (!localSufficient) {
-      const globalIntel = await queryGlobalDB.execute(company.id, student.college_id);
-      const globalSufficient = globalIntel.debrief_count >= GLOBAL_THRESHOLD;
-
-      await logStep({
-        ...ctx, stepNumber: stepNum, stepName: 'QUERY_GLOBAL_DB',
-        input: { company_id: company.id, exclude_college: student.college_id, threshold: GLOBAL_THRESHOLD },
-        output: globalIntel,
-        decisionBasis: `Found ${globalIntel.debrief_count} global debriefs. Threshold is ${GLOBAL_THRESHOLD}.`,
-        decisionMade: globalSufficient ? 'USE_GLOBAL_DATA' : 'SCRAPE_EXTERNAL',
-        startedAt: t, status: 'success',
-      });
-
-      if (globalSufficient) {
-        finalIntel = { ...blendIntelligence(localIntel, globalIntel), company_name: company.name };
-      } else {
-        // ─────────────────────────────────────
-        // STEP 4b: SCRAPE (fallback)
-        // ─────────────────────────────────────
-        const scrapeT = new Date();
-        const scraped = await scrapeCompanyIntel.execute(company.name);
-
-        await logStep({
-          ...ctx, stepNumber: 4.5, stepName: 'SCRAPE_COMPANY_INTEL',
-          input: { company: company.name },
-          output: { topics_found: scraped.top_topics?.length, sources: scraped.scraped_sources },
-          decisionBasis: `Both local (${localIntel.debrief_count}) and global (${globalIntel.debrief_count}) below threshold. Scraping external sources.`,
-          decisionMade: 'USE_SCRAPED_DATA',
-          startedAt: scrapeT, status: 'fallback_triggered',
-        });
-
-        finalIntel = { ...scraped, company_name: company.name };
-      }
-    } else {
-      // Skip global query — log as skipped
-      await logStep({
-        ...ctx, stepNumber: stepNum, stepName: 'QUERY_GLOBAL_DB',
-        input: {}, output: {},
-        decisionBasis: `Local data sufficient (${localIntel.debrief_count} >= ${LOCAL_THRESHOLD}). Skipping global query.`,
-        decisionMade: 'SKIPPED',
-        startedAt: t, status: 'skipped',
-      });
-    }
-
-    // ─────────────────────────────────────────
-    // STEP 5: ASSESS READINESS
-    // ─────────────────────────────────────────
-    stepNum = 5;
-    t = new Date();
-    const { score, gaps, profileType } = assessReadiness(
-      student.inferred_skills || {},
-      finalIntel.top_topics || []
+    student = studentRes.data;
+    drive = driveRes.data;
+    drive.company_name = drive.companies?.name || 'Unknown Company';
+    const hoursLeft = Math.round(
+      (new Date(drive.drive_date) - new Date()) / 3600000
     );
-    const criticalGaps = gaps.filter(g => g.severity === 'CRITICAL');
 
     await logStep({
-      ...ctx, stepNumber: stepNum, stepName: 'ASSESS_READINESS',
-      input: { skills: student.inferred_skills, top_topics: finalIntel.top_topics?.slice(0, 4) },
-      output: { score, profile_type: profileType, gaps_count: gaps.length, critical_gaps: criticalGaps.map(g => g.topic) },
-      decisionBasis: `Readiness score: ${score}. ${criticalGaps.length} critical gap(s): ${criticalGaps.map(g => g.topic).join(', ') || 'none'}`,
-      decisionMade: score >= READINESS_THRESHOLD ? 'NO_GAPS_DETECTED' : 'GAPS_DETECTED',
-      startedAt: t, status: 'success',
-    });
-
-    // ─────────────────────────────────────────
-    // STEP 6: SELECT STRATEGY
-    // ─────────────────────────────────────────
-    stepNum = 6;
-    t = new Date();
-    const strategy = await selectStrategy(student.college_id, company.id, profileType);
-
-    await logStep({
-      ...ctx, stepNumber: stepNum, stepName: 'SELECT_STRATEGY',
-      input: { college_id: student.college_id, company_id: company.id, profile_type: profileType },
-      output: strategy,
-      decisionBasis: `Profile: ${profileType} | Strategy selected: ${strategy.name} (weight: ${strategy.weight}) from ${strategy.source}`,
-      decisionMade: strategy.name,
-      startedAt: t, status: 'success',
-    });
-
-    // ─────────────────────────────────────────
-    // STEP 7: ACT — generateBrief (always)
-    // ─────────────────────────────────────────
-    stepNum = 7;
-    t = new Date();
-    const briefResult = await generateBrief.execute(student, finalIntel, {
-      gaps: criticalGaps,
-      daysLeft,
-      driveId,
       sessionId,
       studentId,
       collegeId: student.college_id,
-      stepNumber: stepNum,
-      stepName: 'GENERATE_BRIEF',
-      companyName: company.name,
+      driveId,
+      stepNumber,
+      stepName: 'OBSERVE_PROFILE',
+      decisionBasis: `Student: ${student.name} | Company: ${drive.company_name} | ${hoursLeft}h remaining`,
+      decisionMade: 'CONTINUE',
+      durationMs: t() - stepStart,
+      status: 'success',
     });
-
-    await logStep({
-      ...ctx, stepNumber: stepNum, stepName: 'GENERATE_BRIEF',
-      input: { strategy: strategy.name, data_source: finalIntel.source, days_left: daysLeft },
-      output: { topics_count: briefResult.topics?.length, confidence: briefResult.confidence_in_data, headline: briefResult.headline?.substring(0, 80) },
-      decisionBasis: `Brief generated using ${finalIntel.source} data. ${briefResult.topics?.length || 0} topics, ${briefResult.prep_plan?.total_hours || 0}hr plan.`,
-      decisionMade: 'BRIEF_DELIVERED',
-      startedAt: t, status: 'success',
-    });
-
-    // ─────────────────────────────────────────
-    // STEP 7b: GENERATE ASSESSMENT (conditional)
-    // ─────────────────────────────────────────
-    stepNum = 8;
-    if (strategy.name.includes('ASSESS') && criticalGaps.length > 0) {
-      t = new Date();
-      const assessResult = await generateAssessment.execute(student, criticalGaps[0], driveId, {
-        companyName: company.name, sessionId, studentId, collegeId: student.college_id,
-        stepNumber: stepNum, stepName: 'GENERATE_ASSESSMENT',
-      });
-
-      await logStep({
-        ...ctx, stepNumber: stepNum, stepName: 'GENERATE_ASSESSMENT',
-        input: { topic: criticalGaps[0].topic, student_level: criticalGaps[0].student_level },
-        output: assessResult,
-        decisionBasis: `Strategy ${strategy.name} includes ASSESS. Critical gap detected in ${criticalGaps[0].topic} (level: ${criticalGaps[0].student_level}).`,
-        decisionMade: 'ASSESSMENT_SENT',
-        startedAt: t, status: 'success',
-      });
-    } else {
-      await logStep({
-        ...ctx, stepNumber: stepNum, stepName: 'GENERATE_ASSESSMENT',
-        input: {}, output: {},
-        decisionBasis: `Strategy: ${strategy.name} does not include ASSESS, or no critical gaps found.`,
-        decisionMade: 'SKIPPED',
-        startedAt: new Date(), status: 'skipped',
-      });
-    }
-
-    // ─────────────────────────────────────────
-    // STEP 7c: SCHEDULE SESSION (conditional)
-    // ─────────────────────────────────────────
-    stepNum = 9;
-    if (strategy.name.includes('SESSION') && criticalGaps.length > 0) {
-      t = new Date();
-      const sessionResult = await scheduleSession.execute(student, criticalGaps, driveId);
-
-      await logStep({
-        ...ctx, stepNumber: stepNum, stepName: 'SCHEDULE_SESSION',
-        input: { critical_gaps: criticalGaps.map(g => g.topic) },
-        output: sessionResult,
-        decisionBasis: `Strategy ${strategy.name} includes SESSION. Auto-enrolling student in ${sessionResult.title}.`,
-        decisionMade: 'SESSION_BOOKED',
-        startedAt: t, status: 'success',
-      });
-    } else {
-      await logStep({
-        ...ctx, stepNumber: stepNum, stepName: 'SCHEDULE_SESSION',
-        input: {}, output: {},
-        decisionBasis: `Strategy: ${strategy.name} does not include SESSION, or no critical gaps.`,
-        decisionMade: 'SKIPPED',
-        startedAt: new Date(), status: 'skipped',
-      });
-    }
-
-    // ─────────────────────────────────────────
-    // STEP 8: CHECK TPC ALERT
-    // ─────────────────────────────────────────
-    stepNum = 10;
-    t = new Date();
-    let tpcAlertResult = { alerted: false };
-
-    if (criticalGaps.length > 0) {
-      tpcAlertResult = await alertTPC.execute(student.college_id, driveId, criticalGaps[0].topic);
-    }
-
-    await logStep({
-      ...ctx, stepNumber: stepNum, stepName: 'ALERT_TPC',
-      input: { critical_gap: criticalGaps[0]?.topic, threshold: TPC_ALERT_MIN_STUDENTS },
-      output: tpcAlertResult,
-      decisionBasis: tpcAlertResult.alerted
-        ? `${tpcAlertResult.affected_count} students have critical gap in ${criticalGaps[0]?.topic}. TPC alert sent.`
-        : `${tpcAlertResult.affected_count || 0} students affected — below threshold (${TPC_ALERT_MIN_STUDENTS}). No alert sent.`,
-      decisionMade: tpcAlertResult.alerted ? 'TPC_ALERTED' : 'SKIPPED',
-      startedAt: t, status: tpcAlertResult.alerted ? 'success' : 'skipped',
-    });
-
-    // ─────────────────────────────────────────
-    // STEP 9: UPDATE STUDENT STATE
-    // ─────────────────────────────────────────
-    stepNum = 11;
-    t = new Date();
-    const newState = strategy.name.includes('ASSESS') ? 'ASSESSED' : 'PREPARING';
-
-    await supabase.from('users')
-      .update({ current_state: newState, confidence_score: score, updated_at: new Date().toISOString() })
-      .eq('id', studentId);
-
-    await logStep({
-      ...ctx, stepNumber: stepNum, stepName: 'UPDATE_STUDENT_STATE',
-      input: { previous_state: student.current_state, new_state: newState, confidence_score: score },
-      output: { state_updated: true, new_state: newState },
-      decisionBasis: `Agent run complete. Strategy: ${strategy.name} → state transitions to ${newState}.`,
-      decisionMade: `STATE_${newState}`,
-      startedAt: t, status: 'success',
-    });
-
-    console.log(`[Reactor] ✅ Agent loop complete | session=${sessionId} | student=${student.name} | state→${newState}`);
-    return { sessionId, outcome: 'completed', new_state: newState, strategy: strategy.name, readiness: score };
-
   } catch (err) {
-    console.error(`[Reactor] ❌ Error at step ${stepNum}:`, err.message);
-    // Always log the crash, even if we failed before obtaining collegeId
     await logStep({
-      ...ctx,
-      collegeId: ctx.collegeId || 'college-lpu-001', // Fallback so DB constraints don't reject it
-      stepNumber: stepNum, stepName: 'ERROR',
-      input: {}, output: {},
+      sessionId,
+      studentId,
+      collegeId,
+      driveId,
+      stepNumber,
+      stepName: 'OBSERVE_PROFILE',
       decisionBasis: err.message,
-      decisionMade: 'AGENT_FAILED',
-      startedAt: new Date(), status: 'failed',
+      decisionMade: 'ERROR',
+      durationMs: t() - stepStart,
+      status: 'failed',
       errorMessage: err.message,
     });
-    throw err;
+    return { sessionId, error: err.message };
   }
+
+  // ── STEP 2: COLD_START_CHECK ─────────────────────────────────
+  stepNumber++;
+  stepStart = t();
+  const hasSkillData =
+    student.inferred_skills &&
+    Object.keys(student.inferred_skills).length > 0;
+  const hasProfile = student.current_state !== 'UNAWARE';
+
+  if (!hasSkillData && !hasProfile) {
+    await logStep({
+      sessionId,
+      studentId,
+      collegeId: student.college_id,
+      driveId,
+      stepNumber,
+      stepName: 'COLD_START_DETECTED',
+      decisionBasis:
+        'No skill data and no profile. Student needs onboarding.',
+      decisionMade: 'EXIT_COLD_START',
+      durationMs: t() - stepStart,
+      status: 'skipped',
+    });
+    return { sessionId, status: 'cold_start', message: 'Student needs to upload resume first' };
+  }
+
+  await logStep({
+    sessionId,
+    studentId,
+    collegeId: student.college_id,
+    driveId,
+    stepNumber,
+    stepName: 'COLD_START_DETECTED',
+    decisionBasis: `hasSkillData=${hasSkillData} | hasProfile=${hasProfile} | PROCEED`,
+    decisionMade: 'PROCEED',
+    durationMs: t() - stepStart,
+    status: 'skipped',
+  });
+
+  // ── STEP 3: QUERY_LOCAL_DB ────────────────────────────────────
+  stepNumber++;
+  stepStart = t();
+  let intel = null;
+  let dataSource = 'LOCAL_DB';
+
+  intel = await synthesizeIntel(student.college_id, drive.company_id);
+  const localCount = intel?.debrief_count || 0;
+
+  await logStep({
+    sessionId,
+    studentId,
+    collegeId: student.college_id,
+    driveId,
+    stepNumber,
+    stepName: 'QUERY_LOCAL_DB',
+    decisionBasis: `local_data=${localCount} debriefs · threshold=5 · ${localCount >= 5 ? 'ABOVE_THRESHOLD' : 'BELOW_THRESHOLD'}`,
+    decisionMade: localCount >= 5 ? 'USE_LOCAL_DATA' : 'NEED_MORE_DATA',
+    durationMs: t() - stepStart,
+    status: 'success',
+  });
+
+  // ── STEP 4: QUERY_GLOBAL_DB (if needed) ──────────────────────
+  if (localCount < 5) {
+    stepNumber++;
+    stepStart = t();
+
+    // Query across all colleges for this company
+    const { data: globalDebriefs } = await supabase
+      .from('interview_debriefs')
+      .select('*')
+      .eq('company_id', drive.company_id)
+      .eq('is_verified', true)
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    const globalCount = globalDebriefs?.length || 0;
+
+    if (globalCount >= 5 && globalDebriefs) {
+      // Blend local + global
+      const topicCounts = {};
+      let selectedCount = 0;
+
+      for (const d of globalDebriefs) {
+        if (d.outcome === 'selected') selectedCount++;
+        const topics = d.extracted_topics?.technical || d.topics_covered || [];
+        for (const topic of topics) {
+          topicCounts[topic] = (topicCounts[topic] || 0) + 1;
+        }
+      }
+
+      intel = {
+        debrief_count: globalCount,
+        local_debrief_count: localCount,
+        global_debrief_count: globalCount - localCount,
+        top_topics: Object.entries(topicCounts)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 8)
+          .map(([topic, count], idx) => ({
+            topic,
+            frequency: count / globalDebriefs.length,
+            priority: idx + 1,
+          })),
+        selection_rate: selectedCount / globalDebriefs.length,
+        confidence_level: globalCount >= 10 ? 'MEDIUM' : 'LOW',
+      };
+      dataSource = 'GLOBAL_DB';
+    }
+
+    await logStep({
+      sessionId,
+      studentId,
+      collegeId: student.college_id,
+      driveId,
+      stepNumber,
+      stepName: 'QUERY_GLOBAL_DB',
+      decisionBasis: `global_count=${globalCount} | source=GLOBAL_DB | blending 70/30`,
+      decisionMade: globalCount >= 5 ? 'USE_GLOBAL_DATA' : 'INSUFFICIENT_DATA',
+      durationMs: t() - stepStart,
+      status: 'success',
+    });
+  }
+
+  // Fallback minimal intel if still nothing
+  if (!intel || intel.debrief_count === 0) {
+    intel = {
+      debrief_count: 0,
+      top_topics: [
+        { topic: 'dsa', frequency: 0.85, priority: 1 },
+        { topic: 'system_design', frequency: 0.65, priority: 2 },
+        { topic: 'behavioral', frequency: 0.75, priority: 3 },
+      ],
+      selection_rate: 0.5,
+      confidence_level: 'LOW',
+    };
+    dataSource = 'DEFAULT';
+  }
+
+  // ── STEP 5: ASSESS_READINESS ──────────────────────────────────
+  stepNumber++;
+  stepStart = t();
+
+  const readinessScore = calculateReadiness(
+    student.inferred_skills,
+    intel.top_topics
+  );
+
+  // Find critical gaps
+  const criticalGaps = [];
+  for (const topic of intel.top_topics) {
+    const skillKey = topic.topic?.toLowerCase().replace(/ /g, '_');
+    const studentLevel = student.inferred_skills?.[skillKey] || 0.3;
+    if (topic.frequency >= 0.6 && studentLevel < 0.4) {
+      criticalGaps.push(topic.topic);
+    }
+  }
+
+  await logStep({
+    sessionId,
+    studentId,
+    collegeId: student.college_id,
+    driveId,
+    stepNumber,
+    stepName: 'ASSESS_READINESS',
+    decisionBasis: `readiness_score=${readinessScore.toFixed(2)} · critical_gaps=[${criticalGaps.join(',')}]`,
+    decisionMade: 'CONTINUE',
+    durationMs: t() - stepStart,
+    status: 'success',
+  });
+
+  // ── STEP 6: SELECT_STRATEGY ───────────────────────────────────
+  stepNumber++;
+  stepStart = t();
+
+  const profileType =
+    readinessScore >= 0.7
+      ? 'HIGH_CONFIDENCE'
+      : readinessScore >= 0.4
+      ? 'MEDIUM_CONFIDENCE'
+      : 'LOW_CONFIDENCE';
+
+  const strategy = await selectStrategy(
+    student.college_id,
+    drive.company_id,
+    profileType
+  );
+
+  await logStep({
+    sessionId,
+    studentId,
+    collegeId: student.college_id,
+    driveId,
+    stepNumber,
+    stepName: 'SELECT_STRATEGY',
+    decisionBasis: `profileType=${profileType} · strategy=${strategy} · source=STRATEGY_WEIGHTS_TABLE`,
+    decisionMade: strategy,
+    durationMs: t() - stepStart,
+    status: 'success',
+  });
+
+  // ── STEP 7: GENERATE_BRIEF ────────────────────────────────────
+  stepNumber++;
+  stepStart = t();
+  let brief = null;
+  let briefStatus = 'success';
+
+  try {
+    brief = await generateBrief({
+      student,
+      intel,
+      drive: { ...drive, company_name: drive.company_name },
+    });
+    brief.data_source = dataSource;
+    brief.confidence_in_data = intel.confidence_level;
+  } catch (err) {
+    console.error('[Agent] Brief generation failed:', err.message);
+    briefStatus = 'fallback_triggered';
+    // Construct a basic brief from intel data
+    brief = buildFallbackBrief(student, intel, drive);
+  }
+
+  // Save brief to DB
+  const { data: savedBrief } = await supabase
+    .from('skill_assessments')
+    .insert({
+      student_id: studentId,
+      college_id: student.college_id,
+      drive_id: driveId,
+      topic_assessed: 'FULL_BRIEF',
+      questions: brief,
+      overall_score: readinessScore,
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+
+  await logStep({
+    sessionId,
+    studentId,
+    collegeId: student.college_id,
+    driveId,
+    stepNumber,
+    stepName: 'GENERATE_BRIEF',
+    decisionBasis: `Calling Grok · focus=${criticalGaps[0] || 'general'} · topics=${intel.top_topics.length}`,
+    decisionMade: 'COMPLETE',
+    output: brief,
+    durationMs: t() - stepStart,
+    status: briefStatus,
+  });
+
+  // ── STEP 8: GENERATE_ASSESSMENT (if strategy includes it) ─────
+  if (strategy.includes('ASSESS') && criticalGaps.length > 0) {
+    stepNumber++;
+    stepStart = t();
+
+    try {
+      const mainGap = criticalGaps[0];
+      const topicIntel = intel.top_topics.find((t) => t.topic === mainGap);
+      const studentLevel = student.inferred_skills?.[mainGap] || 0.2;
+
+      const assessment = await generateAssessment({
+        topic: mainGap,
+        subtopics: topicIntel?.specific_subtopics || [mainGap],
+        studentLevel,
+        companyName: drive.company_name,
+      });
+
+      // Save assessment
+      await supabase.from('skill_assessments').insert({
+        student_id: studentId,
+        college_id: student.college_id,
+        drive_id: driveId,
+        topic_assessed: mainGap,
+        questions: assessment.questions,
+        overall_score: studentLevel,
+        status: 'sent',
+        sent_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+      });
+
+      await logStep({
+        sessionId,
+        studentId,
+        collegeId: student.college_id,
+        driveId,
+        stepNumber,
+        stepName: 'GENERATE_ASSESSMENT',
+        decisionBasis: `critical_gap=${mainGap} · generating ${assessment.questions?.length || 3} targeted questions`,
+        decisionMade: 'COMPLETE',
+        durationMs: t() - stepStart,
+        status: 'success',
+      });
+    } catch (err) {
+      await logStep({
+        sessionId,
+        studentId,
+        collegeId: student.college_id,
+        driveId,
+        stepNumber,
+        stepName: 'GENERATE_ASSESSMENT',
+        decisionBasis: `Assessment generation failed: ${err.message}`,
+        decisionMade: 'SKIP',
+        durationMs: t() - stepStart,
+        status: 'failed',
+      });
+    }
+  }
+
+  // ── STEP 9: ALERT_TPC (cohort gap detection) ─────────────────
+  stepNumber++;
+  stepStart = t();
+
+  if (criticalGaps.length > 0) {
+    // Check how many students in this cohort share the same gap
+    const { data: cohortStudents } = await supabase
+      .from('student_registrations')
+      .select('student_id, users!inner(inferred_skills, name)')
+      .eq('drive_id', driveId)
+      .eq('college_id', student.college_id);
+
+    const atRiskStudents = (cohortStudents || []).filter((s) => {
+      const skills = s.users?.inferred_skills || {};
+      const mainGapKey = criticalGaps[0];
+      return (skills[mainGapKey] || 0.3) < 0.4;
+    });
+
+    if (atRiskStudents.length >= 3) {
+      // Create TPC notification
+      await supabase.from('notifications').insert({
+        student_id: studentId,
+        college_id: student.college_id,
+        channel: 'in_app',
+        notification_type: 'tpc_alert',
+        content: `CRITICAL GAP ALERT: ${atRiskStudents.length} students preparing for ${drive.company_name} have a critical gap in ${criticalGaps[0]}. Recommend scheduling a focused session.`,
+        metadata: {
+          drive_id: driveId,
+          critical_gap: criticalGaps[0],
+          at_risk_count: atRiskStudents.length,
+        },
+        status: 'sent',
+      });
+    }
+
+    await logStep({
+      sessionId,
+      studentId,
+      collegeId: student.college_id,
+      driveId,
+      stepNumber,
+      stepName: 'ALERT_TPC',
+      decisionBasis: `at_risk_students=${atRiskStudents.length} · same_gap=${criticalGaps[0]} · alert_sent=${atRiskStudents.length >= 3}`,
+      decisionMade: atRiskStudents.length >= 3 ? 'ALERTED' : 'THRESHOLD_NOT_MET',
+      durationMs: t() - stepStart,
+      status: 'success',
+    });
+  } else {
+    await logStep({
+      sessionId,
+      studentId,
+      collegeId: student.college_id,
+      driveId,
+      stepNumber,
+      stepName: 'ALERT_TPC',
+      decisionBasis: 'No critical gaps detected. No alert needed.',
+      decisionMade: 'NO_ACTION',
+      durationMs: t() - stepStart,
+      status: 'skipped',
+    });
+  }
+
+  // ── STEP 10: UPDATE_STUDENT_STATE ─────────────────────────────
+  stepNumber++;
+  stepStart = t();
+
+  const newState =
+    readinessScore >= 0.7
+      ? 'INTERVIEW_READY'
+      : readinessScore >= 0.4
+      ? 'PREPARING'
+      : 'ASSESSED';
+
+  await supabase
+    .from('users')
+    .update({
+      current_state: newState,
+      confidence_score: readinessScore,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', studentId);
+
+  await logStep({
+    sessionId,
+    studentId,
+    collegeId: student.college_id,
+    driveId,
+    stepNumber,
+    stepName: 'UPDATE_STUDENT_STATE',
+    decisionBasis: `new_state=${newState} · confidence_score=${readinessScore.toFixed(2)} · brief_delivered=true`,
+    decisionMade: 'COMPLETE',
+    durationMs: t() - stepStart,
+    status: 'success',
+  });
+
+  console.log(`[Agent] Loop complete | session=${sessionId} | state=${newState}`);
+
+  return {
+    sessionId,
+    status: 'complete',
+    readinessScore,
+    newState,
+    strategy,
+    briefId: savedBrief?.id,
+  };
 }
 
-module.exports = { runAgentLoop };
+// ── Fallback brief when Grok is unavailable ──
+function buildFallbackBrief(student, intel, drive) {
+  const topics = (intel.top_topics || []).map((t, idx) => {
+    const skillKey = t.topic?.toLowerCase().replace(/ /g, '_');
+    const studentLevel = student.inferred_skills?.[skillKey] || 0.3;
+    const gap = t.frequency - studentLevel;
+    return {
+      name: t.topic,
+      priority: idx + 1,
+      frequency_in_interviews: t.frequency,
+      student_current_level: studentLevel,
+      required_level: t.frequency,
+      gap_severity: gap > 0.4 ? 'CRITICAL' : gap > 0.2 ? 'MODERATE' : 'OK',
+      time_to_allocate_hours: Math.round(gap * 10),
+      specific_subtopics: [t.topic],
+      sample_questions: [`Demonstrate proficiency in ${t.topic}`],
+    };
+  });
+
+  return {
+    headline: `Focus on ${topics[0]?.name || 'DSA'} — your most critical gap for ${drive.company_name}.`,
+    confidence_in_data: intel.confidence_level,
+    data_source: 'FALLBACK',
+    topics,
+    prep_plan: {
+      total_hours: 16,
+      schedule: [
+        { day: 1, focus: topics[0]?.name || 'Core DSA', hours: 6, tasks: ['Study fundamentals', 'Practice problems', 'Review solutions'] },
+        { day: 2, focus: topics[1]?.name || 'System Design', hours: 6, tasks: ['Study patterns', 'Design practice', 'Mock interview'] },
+        { day: 3, focus: 'Review & Mock', hours: 4, tasks: ['Full mock interview', 'Weak area review', 'Rest'] },
+      ],
+    },
+    success_tips: ['Think aloud during interviews', 'State assumptions before starting', 'Discuss trade-offs'],
+    red_flags_to_avoid: ['Jumping to code without approach', 'Not handling edge cases'],
+    mock_question_for_now: `Solve a coding problem related to ${topics[0]?.name || 'arrays'} in 30 minutes.`,
+  };
+}
