@@ -108,10 +108,7 @@ export default function DashboardPage() {
   const [briefCount, setBriefCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
-  const [showPopup, setShowPopup] = useState(false);
-  const [popupStep, setPopupStep] = useState<'prompt' | 'debrief'>('prompt');
-  const [debriefForm, setDebriefForm] = useState({ questions: '', outcome: 'selected', round: 'technical_1' });
-  const [debriefStatus, setDebriefStatus] = useState<'idle' | 'submitting' | 'done'>('idle');
+
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadDashboard = useCallback(async () => {
@@ -161,12 +158,7 @@ export default function DashboardPage() {
   useEffect(() => {
     loadDashboard();
 
-    // Show debrief popup periodically (every 2 hours max)
-    const dismissed = localStorage.getItem('interview_popup_dismissed');
-    const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
-    if (!dismissed || parseInt(dismissed) < twoHoursAgo) {
-      setTimeout(() => setShowPopup(true), 1500);
-    }
+
 
     // Re-sync student profile when updated (e.g. after CV upload)
     const onProfileUpdated = (e: Event) => {
@@ -197,46 +189,7 @@ export default function DashboardPage() {
     };
   }, [loadDashboard]);
 
-  const dismissPopup = () => {
-    localStorage.setItem('interview_popup_dismissed', Date.now().toString());
-    setShowPopup(false);
-  };
 
-  const submitDebrief = async () => {
-    if (!debriefForm.questions.trim()) return;
-    setDebriefStatus('submitting');
-    try {
-      const stored = getStudent();
-      // Always use the real logged-in student ID
-      const studentId = stored?.id;
-      if (!studentId) {
-        setDebriefStatus('idle');
-        return;
-      }
-
-      await api.submitDebrief({
-        driveId: drives[0]?.id || 'demo-drive-google',
-        collegeId: stored?.college_id || 'college-lpu-001',
-        companyId: drives[0]?.company?.id || 'company-google-001',
-        roundType: debriefForm.round,
-        questionsAsked: debriefForm.questions,
-        topicsCovered: [],
-        outcome: debriefForm.outcome,
-        difficultyRating: 3,
-        studentId,
-      });
-
-      setDebriefStatus('done');
-      // Broadcast to all subscribers (same tab + other tabs)
-      emitDebriefUpdated({ studentId, source: 'dashboard-popup' });
-      setTimeout(() => {
-        dismissPopup();
-        setDebriefStatus('idle');
-      }, 1500);
-    } catch {
-      setDebriefStatus('idle');
-    }
-  };
 
   // ── Derived data ───────────────────────────────────────────
   const skills = student?.inferred_skills
@@ -278,88 +231,7 @@ export default function DashboardPage() {
         {/* Toast notification */}
         {toast && <Toast message={toast} onClose={() => setToast(null)} />}
 
-        {/* Interview Day Popup */}
-        {showPopup && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-            <div className="w-[460px] bg-[#0f0f1a] border border-[#2a2a3d] rounded-2xl p-10 shadow-2xl">
-              {popupStep === 'prompt' ? (
-                <>
-                  <div className="flex justify-center mb-6">
-                    <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl"
-                      style={{ background: 'rgba(245,158,11,0.15)', border: '2px solid rgba(245,158,11,0.4)' }}>
-                      <span className="animate-pulse">📅</span>
-                    </div>
-                  </div>
-                  <h2 className="font-display text-2xl text-center text-[#e8e6f8] mb-2">How did your interview go?</h2>
-                  <p className="text-[#6b7280] text-sm text-center mb-8">
-                    Share what happened — it helps every student who interviews after you.
-                  </p>
-                  <div className="flex gap-3 mb-4">
-                    <button onClick={() => setPopupStep('debrief')}
-                      className="flex-1 py-3 rounded-xl text-sm font-semibold border border-emerald-500/40 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/12 transition">
-                      ✓ Yes, I interviewed
-                    </button>
-                    <button onClick={dismissPopup}
-                      className="flex-1 py-3 rounded-xl text-sm font-semibold border border-[#3a3a4d] text-[#6b7280] hover:bg-white/5 transition">
-                      ✗ Didn&apos;t go
-                    </button>
-                  </div>
-                  <button onClick={dismissPopup}
-                    className="w-full text-center text-[12px] text-[#4b4b6b] hover:text-[#6b7280] transition">
-                    Remind me later
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h2 className="font-display text-xl text-[#e8e6f8] mb-1">Share your experience</h2>
-                  <p className="text-[#6b7280] text-xs mb-5">Anonymized and added to the intelligence pool</p>
 
-                  <div className="space-y-4">
-                    <div className="flex gap-2 flex-wrap">
-                      {[
-                        { v: 'technical_1', l: 'Technical 1' },
-                        { v: 'technical_2', l: 'Technical 2' },
-                        { v: 'system_design', l: 'System Design' },
-                        { v: 'hr', l: 'HR' },
-                        { v: 'online_test', l: 'Online Test' },
-                      ].map(r => (
-                        <button key={r.v} onClick={() => setDebriefForm(f => ({ ...f, round: r.v }))}
-                          className={`px-3 py-1.5 text-xs rounded-full border transition ${debriefForm.round === r.v ? 'border-indigo-500/60 text-indigo-300 bg-indigo-500/10' : 'border-[#2a2a3d] text-[#9b9bbb] hover:border-indigo-500/40'}`}>
-                          {r.l}
-                        </button>
-                      ))}
-                    </div>
-                    <textarea
-                      rows={3}
-                      value={debriefForm.questions}
-                      onChange={e => setDebriefForm(f => ({ ...f, questions: e.target.value }))}
-                      placeholder="What questions did they ask? Topics covered, difficulty..."
-                      className="w-full bg-[#0a0a14] border border-[#2a2a3d] rounded-xl p-3 text-sm text-[#e8e6f8] placeholder:text-[#4b4b6b] outline-none focus:border-indigo-500/60 resize-none transition" />
-                    <div className="flex gap-3">
-                      {[{ v: 'selected', l: 'Got through ✓' }, { v: 'rejected', l: 'Rejected ✗' }, { v: 'waiting', l: 'Waiting...' }].map(o => (
-                        <button key={o.v} onClick={() => setDebriefForm(f => ({ ...f, outcome: o.v }))}
-                          className={`flex-1 py-2 text-xs rounded-lg border transition ${debriefForm.outcome === o.v ? 'border-indigo-500/40 text-indigo-300 bg-indigo-500/10' : 'border-[#2a2a3d] text-[#6b7280] hover:border-indigo-500/40'}`}>
-                          {o.l}
-                        </button>
-                      ))}
-                    </div>
-                    <button onClick={submitDebrief} disabled={debriefStatus === 'submitting' || debriefStatus === 'done'}
-                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition disabled:opacity-60 flex items-center justify-center gap-2">
-                      {debriefStatus === 'done' ? '✓ Submitted! Refreshing dashboard...' : debriefStatus === 'submitting' ? (
-                        <><svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Saving to database...</>
-                      ) : 'Submit Debrief →'}
-                    </button>
-                    {debriefStatus === 'done' && (
-                      <p className="text-xs text-emerald-400 text-center animate-fade-in-up">
-                        ✓ Saved to Supabase · Dashboard refreshing...
-                      </p>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
 
         <div className="max-w-[1200px] mx-auto space-y-6 relative z-10">
           {/* Welcome header */}
