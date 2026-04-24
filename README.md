@@ -339,7 +339,7 @@ campusintel/
 
 ## 👥 Team
 
-Built for **Hack2AI** by **Team CampusIntel** at Lovely Professional University.
+Built by **Team HYPR** at Lovely Professional University.
 
 ---
 
