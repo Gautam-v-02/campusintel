@@ -1,8 +1,9 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { getStudent } from '@/lib/auth';
 import Link from 'next/link';
+import { subscribeDebriefUpdates } from '@/lib/events';
 
 interface Drive {
   id: string;
@@ -35,43 +36,53 @@ export default function DrivesPage() {
   const [filter, setFilter] = useState('All Status');
   const [registering, setRegistering] = useState<string | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const student = getStudent();
-        const collegeId = student?.college_id || 'college-lpu-001';
-        const data = await api.getDrives(collegeId);
-        if (Array.isArray(data)) {
-          // Fetch registration statuses for this student
-          if (student?.id) {
-            const regs = await api.getStudentRegistrations(student.id);
-            const regMap: Record<string, string> = {};
-            if (Array.isArray(regs)) {
-              for (const r of regs) {
-                regMap[r.drive_id] = r.status;
-              }
+  const loadDrives = useCallback(async () => {
+    try {
+      const student = getStudent();
+      const collegeId = student?.college_id || 'college-lpu-001';
+      const data = await api.getDrives(collegeId);
+      if (Array.isArray(data)) {
+        // Fetch registration statuses for this student
+        if (student?.id) {
+          const regs = await api.getStudentRegistrations(student.id);
+          const regMap: Record<string, string> = {};
+          if (Array.isArray(regs)) {
+            for (const r of regs) {
+              regMap[r.drive_id] = r.status;
             }
-            setDrives(data.map(d => ({
-              ...d,
-              company: d.companies || d.company || { id: d.company_id, name: 'Unknown' },
-              registration_status: regMap[d.id] || d.status || 'upcoming',
-            })));
-          } else {
-            setDrives(data.map(d => ({
-              ...d,
-              company: d.companies || d.company || { id: d.company_id, name: 'Unknown' },
-              registration_status: d.status || 'upcoming',
-            })));
           }
+          setDrives(data.map(d => ({
+            ...d,
+            company: d.companies || d.company || { id: d.company_id, name: 'Unknown' },
+            registration_status: regMap[d.id] || d.status || 'upcoming',
+          })));
+        } else {
+          setDrives(data.map(d => ({
+            ...d,
+            company: d.companies || d.company || { id: d.company_id, name: 'Unknown' },
+            registration_status: d.status || 'upcoming',
+          })));
         }
-      } catch (err: any) {
-        setError(err.message || 'Failed to load drives');
-      } finally {
-        setLoading(false);
       }
-    };
-    load();
+      setError('');
+    } catch (err: any) {
+      setError(err.message || 'Failed to load drives');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadDrives();
+
+    const unsubscribeDebrief = subscribeDebriefUpdates(() => {
+      loadDrives();
+    });
+
+    return () => {
+      unsubscribeDebrief();
+    };
+  }, [loadDrives]);
 
   const handleRegister = async (driveId: string) => {
     const student = getStudent();

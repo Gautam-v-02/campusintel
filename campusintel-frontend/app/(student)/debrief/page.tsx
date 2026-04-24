@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import { getStudent } from '@/lib/auth';
+import { emitDebriefUpdated } from '@/lib/events';
 
 const ROUND_TYPES = [
   { value: 'online_test', label: '💻 Online Test / OA' },
@@ -154,10 +155,12 @@ export default function DebriefPage() {
         setStatus('success');
         setShowForm(false);
 
-        // Notify dashboard to refresh
-        window.dispatchEvent(new CustomEvent('ci:debrief-submitted', {
-          detail: { studentId: stored.id, totalDebriefs: res.total_debriefs }
-        }));
+        // Notify all listeners (dashboard, briefs, drives, pulse, other tabs)
+        emitDebriefUpdated({
+          studentId: stored.id,
+          totalDebriefs: res.total_debriefs,
+          source: 'debrief-page',
+        });
 
         // Reload the feed
         const updated = await api.getDebriefs(stored.college_id || 'college-lpu-001', 'company-google-001');

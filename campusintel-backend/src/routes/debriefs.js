@@ -5,6 +5,27 @@ import { extractDebriefTopics } from '../lib/grok.js';
 
 const router = Router();
 
+function calculateReadiness(studentSkills = {}, topTopics = []) {
+  if (!Array.isArray(topTopics) || topTopics.length === 0) return 0.5;
+
+  let weightedSum = 0;
+  let totalWeight = 0;
+
+  for (const topic of topTopics) {
+    const skillKey = String(topic.topic || '')
+      .toLowerCase()
+      .replace(/\s+/g, '_');
+    const studentLevel = Number(studentSkills?.[skillKey] ?? 0.3);
+    const freq = Number(topic.frequency ?? 0.5);
+
+    weightedSum += studentLevel * freq;
+    totalWeight += freq;
+  }
+
+  if (totalWeight <= 0) return 0.3;
+  return Math.max(0, Math.min(1, weightedSum / totalWeight));
+}
+
 // Submit a debrief
 router.post('/', async (req, res) => {
   try {
@@ -53,8 +74,15 @@ router.post('/', async (req, res) => {
 
     if (error) throw error;
 
-    // Resynthesize intel for this company
-    await resynthesizeIntel(collegeId, companyId);
+    // Resynthesize intel for this company and propagate score updates
+    const intel = await resynthesizeIntel(collegeId, companyId);
+    await refreshImpactedStudentScores({
+      collegeId,
+      companyId,
+      driveId,
+      fallbackStudentId: studentId,
+      topTopics: intel?.top_topics || [],
+    });
 
     // Get updated count
     const { count } = await supabase
@@ -118,7 +146,7 @@ async function resynthesizeIntel(collegeId, companyId) {
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (!debriefs || debriefs.length === 0) return;
+    if (!debriefs || debriefs.length === 0) return null;
 
     const topicCounts = {};
     let selectedCount = 0;
@@ -150,29 +178,116 @@ async function resynthesizeIntel(collegeId, companyId) {
         ? parseFloat((selectedCount / totalRounds).toFixed(2))
         : 0.5;
 
+    const payload = {
+      college_id: collegeId,
+      company_id: companyId,
+      debrief_count: debriefs.length,
+      local_debrief_count: debriefs.length,
+      top_topics: topTopics,
+      selection_rate: selectionRate,
+      confidence_level:
+        debriefs.length >= 10
+          ? 'HIGH'
+          : debriefs.length >= 5
+          ? 'MEDIUM'
+          : 'LOW',
+      last_synthesized: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
     await supabase
       .from('college_company_intel')
-      .upsert(
-        {
-          college_id: collegeId,
-          company_id: companyId,
-          debrief_count: debriefs.length,
-          local_debrief_count: debriefs.length,
-          top_topics: topTopics,
-          selection_rate: selectionRate,
-          confidence_level:
-            debriefs.length >= 10
-              ? 'HIGH'
-              : debriefs.length >= 5
-              ? 'MEDIUM'
-              : 'LOW',
-          last_synthesized: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'college_id,company_id' }
-      );
+      .upsert(payload, { onConflict: 'college_id,company_id' });
+
+    return {
+      debrief_count: debriefs.length,
+      top_topics: topTopics,
+      selection_rate: selectionRate,
+      confidence_level: payload.confidence_level,
+    };
   } catch (err) {
     console.error('[Intel] Re-synthesis error:', err.message);
+    return null;
+  }
+}
+
+async function refreshImpactedStudentScores({
+  collegeId,
+  companyId,
+  driveId,
+  fallbackStudentId,
+  topTopics,
+}) {
+  try {
+    if (!Array.isArray(topTopics) || topTopics.length === 0) return;
+
+    const studentIds = new Set();
+
+    // Prefer direct drive registrations when driveId is known.
+    if (driveId) {
+      const { data: directRegs, error: directErr } = await supabase
+        .from('student_registrations')
+        .select('student_id')
+        .eq('drive_id', driveId);
+      if (!directErr && Array.isArray(directRegs)) {
+        for (const reg of directRegs) {
+          if (reg.student_id) studentIds.add(reg.student_id);
+        }
+      }
+    }
+
+    // Also include registrations from all drives of the same company in this college.
+    const { data: companyDrives, error: driveErr } = await supabase
+      .from('campus_drives')
+      .select('id')
+      .eq('college_id', collegeId)
+      .eq('company_id', companyId);
+
+    if (!driveErr && Array.isArray(companyDrives) && companyDrives.length > 0) {
+      const driveIds = companyDrives.map((d) => d.id).filter(Boolean);
+      const { data: regs, error: regErr } = await supabase
+        .from('student_registrations')
+        .select('student_id')
+        .in('drive_id', driveIds);
+      if (!regErr && Array.isArray(regs)) {
+        for (const reg of regs) {
+          if (reg.student_id) studentIds.add(reg.student_id);
+        }
+      }
+    }
+
+    if (fallbackStudentId) studentIds.add(fallbackStudentId);
+    if (studentIds.size === 0) return;
+
+    const { data: students, error: studentErr } = await supabase
+      .from('users')
+      .select('id, inferred_skills, current_state')
+      .in('id', Array.from(studentIds));
+
+    if (studentErr || !Array.isArray(students) || students.length === 0) return;
+
+    await Promise.all(
+      students.map(async (student) => {
+        const nextScore = Number(
+          calculateReadiness(student.inferred_skills || {}, topTopics).toFixed(2)
+        );
+        const nextState =
+          student.current_state === 'UNAWARE'
+            ? 'PROFILED'
+            : student.current_state;
+
+        await supabase
+          .from('users')
+          .update({
+            confidence_score: nextScore,
+            current_state: nextState,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', student.id);
+      })
+    );
+  } catch (err) {
+    console.error('[Debriefs] Failed to refresh impacted student scores:', err.message);
   }
 }
 

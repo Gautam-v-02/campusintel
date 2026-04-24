@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { getStudent } from '@/lib/auth';
+import { subscribeDebriefUpdates } from '@/lib/events';
 
 // Severity styles
 const SEVERITY_STYLE: Record<string, string> = {
@@ -139,6 +140,14 @@ export default function BriefPage() {
 
   useEffect(() => {
     loadBrief();
+
+    const unsubscribeDebrief = subscribeDebriefUpdates(() => {
+      loadBrief();
+    });
+
+    return () => {
+      unsubscribeDebrief();
+    };
   }, [loadBrief]);
 
   if (loading) {

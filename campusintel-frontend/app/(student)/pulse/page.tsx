@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { supabase } from '@/lib/supabase';
 import { TourProvider, TourReopen } from '@/components/tour/TourProvider';
+import { subscribeDebriefUpdates } from '@/lib/events';
 
 const PULSE_TOUR = [
   {
@@ -421,6 +422,34 @@ export default function CampusPulsePage() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // React immediately to in-app debrief submissions (before realtime delivery).
+  useEffect(() => {
+    const unsubscribeDebrief = subscribeDebriefUpdates((event) => {
+      const detail = (event?.detail || {}) as Record<string, any>;
+      const now = new Date();
+      const timeStr = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      setStats((s) => ({ ...s, debriefs: s.debriefs + 1 }));
+      setPulseLog((prev) => [
+        {
+          text: 'New interview debrief shared by a student',
+          color: '#818cf8',
+          time: timeStr,
+        },
+        ...prev.slice(0, 4),
+      ]);
+
+      if (detail?.source === 'debrief-page' || detail?.source === 'dashboard-popup') {
+        animatePulse('rahul', 'google', 'debrief');
+      }
+    });
+
+    return () => {
+      unsubscribeDebrief();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

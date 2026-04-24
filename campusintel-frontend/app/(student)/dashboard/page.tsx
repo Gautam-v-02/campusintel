@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { TourProvider, TourReopen } from '@/components/tour/TourProvider';
 import { api } from '@/lib/api';
 import { getStudent, getCollegeId } from '@/lib/auth';
+import { emitDebriefUpdated, subscribeDebriefUpdates } from '@/lib/events';
 
 // ── Types ──────────────────────────────────────────────────────
 interface AgentLog {
@@ -175,11 +176,10 @@ export default function DashboardPage() {
     window.addEventListener('ci:profile-updated', onProfileUpdated);
 
     // Listen for debrief submissions → refresh dashboard instantly
-    const onDebriefSubmitted = () => {
+    const unsubscribeDebrief = subscribeDebriefUpdates(() => {
       loadDashboard();
       setToast('Intel updated! AI has re-synthesized from latest debriefs.');
-    };
-    window.addEventListener('ci:debrief-submitted', onDebriefSubmitted);
+    });
 
     // Poll agent logs every 30 seconds for live feel
     pollingRef.current = setInterval(() => {
@@ -192,7 +192,7 @@ export default function DashboardPage() {
 
     return () => {
       window.removeEventListener('ci:profile-updated', onProfileUpdated);
-      window.removeEventListener('ci:debrief-submitted', onDebriefSubmitted);
+      unsubscribeDebrief();
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, [loadDashboard]);
@@ -227,8 +227,8 @@ export default function DashboardPage() {
       });
 
       setDebriefStatus('done');
-      // Dispatch event so dashboard (and any other subscriber) refreshes
-      window.dispatchEvent(new CustomEvent('ci:debrief-submitted'));
+      // Broadcast to all subscribers (same tab + other tabs)
+      emitDebriefUpdated({ studentId, source: 'dashboard-popup' });
       setTimeout(() => {
         dismissPopup();
         setDebriefStatus('idle');
