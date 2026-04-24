@@ -25,8 +25,14 @@ export default function ResumeUploader({
       setStatus('error');
       return;
     }
-    if (file.type !== 'application/pdf') {
-      setErrorMsg('Please upload a PDF file.');
+    // Strict file type validation — only PDF resumes allowed
+    const fileExt = file.name.split('.').pop()?.toLowerCase();
+    const allowedTypes = ['application/pdf'];
+    const allowedExts = ['pdf'];
+
+    if (!allowedExts.includes(fileExt || '') || !allowedTypes.includes(file.type)) {
+      const rejected = fileExt?.toUpperCase() || 'unknown';
+      setErrorMsg(`Only PDF files are accepted. You uploaded a .${rejected} file. Please upload your resume as a PDF.`);
       setStatus('error');
       return;
     }
