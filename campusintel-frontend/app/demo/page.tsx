@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ReasoningTrace from '@/components/agent/ReasoningTrace';
 import PrepBrief from '@/components/student/PrepBrief';
-import TpcDashboard from '@/components/tpc/TpcDashboard';
 import ResumeUploader from '@/components/student/ResumeUploader';
 import ConfidenceChart from '@/components/agent/ConfidenceChart';
 import { useAgentLogs } from '@/hooks/useAgentLogs';
@@ -63,7 +62,7 @@ export default function DemoScreen() {
   const router = useRouter();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [activeTab, setActiveTab] = useState<'TRACE' | 'BRIEF' | 'TPC' | 'RESUME' | 'CHART'>('TRACE');
+  const [activeTab, setActiveTab] = useState<'TRACE' | 'BRIEF' | 'RESUME' | 'CHART'>('TRACE');
   const [replayMode, setReplayMode] = useState(false);
   const [replayLogs, setReplayLogs] = useState<typeof REPLAY_LOGS>([]);
   const [student, setStudent] = useState<ReturnType<typeof getStudent>>(null);
@@ -203,7 +202,7 @@ export default function DemoScreen() {
 
         {/* Tab Navigation */}
         <div id="tour-demo-tabs" className="flex gap-2 border-b border-gray-800 pb-px pt-2 px-2 rounded-t-xl bg-gray-900/20 overflow-x-auto">
-          {(['TRACE', 'CHART', 'BRIEF', 'TPC', 'RESUME'] as const).map((tab) => (
+          {(['TRACE', 'CHART', 'BRIEF', 'RESUME'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
@@ -216,7 +215,6 @@ export default function DemoScreen() {
               {tab === 'TRACE' ? '🧠 Live Reasoning'
                 : tab === 'CHART' ? '📈 Confidence Chart'
                 : tab === 'BRIEF' ? '📋 Generated Brief'
-                : tab === 'TPC' ? '🏫 TPC Dashboard'
                 : '📄 Resume Upload'}
             </button>
           ))}
@@ -227,12 +225,6 @@ export default function DemoScreen() {
           {activeTab === 'TRACE' && <ReasoningTrace logs={logs} isActive={isRunning} />}
           {activeTab === 'CHART' && <ConfidenceChart logs={logs} isActive={isRunning} />}
           {activeTab === 'BRIEF' && <PrepBrief logs={logs} />}
-          {activeTab === 'TPC' && (
-            <TpcDashboard
-              isDemoActive={!!sessionId}
-              contextName={student?.name || 'Student'}
-            />
-          )}
           {activeTab === 'RESUME' && (
             <div className="space-y-4">
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
