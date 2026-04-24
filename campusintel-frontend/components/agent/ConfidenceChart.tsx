@@ -1,20 +1,21 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 
-type Log = { confidence_score?: number; step?: number; action?: string };
+type Log = { confidence_score?: number; step?: number; action?: string; step_name?: string };
 
 type Props = {
   logs: Log[];
   isActive: boolean;
+  studentScore?: number; // real confidence score from student profile
 };
 
 // Pulls confidence_score out of each log entry and plots it over time
-export default function ConfidenceChart({ logs, isActive }: Props) {
+export default function ConfidenceChart({ logs, isActive, studentScore }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [points, setPoints] = useState<number[]>([]);
   const [animProgress, setAnimProgress] = useState(0);
 
-  // Extract confidence scores from logs — fallback to estimated ramp if not set
+  // Extract confidence scores from logs — use real student score as target
   useEffect(() => {
     if (logs.length === 0) {
       setPoints([]);
@@ -22,18 +23,42 @@ export default function ConfidenceChart({ logs, isActive }: Props) {
       return;
     }
 
-    const scores = logs
-      .map((l, i) => {
-        if (typeof l.confidence_score === 'number') return l.confidence_score;
-        // Fallback: estimate readiness based on step position
-        const base = 0.1 + (i / Math.max(logs.length - 1, 1)) * 0.75;
-        const jitter = (Math.sin(i * 2.3) * 0.04);
-        return Math.min(0.95, Math.max(0.05, base + jitter));
-      });
+    // The target score is either the real student score or a sensible default
+    const targetScore = studentScore || 0.48;
+
+    // Step-specific weights that simulate how confidence builds per agent step
+    const STEP_WEIGHTS: Record<string, number> = {
+      OBSERVE_PROFILE: 0.08,
+      COLD_START_DETECTED: 0.02,
+      QUERY_LOCAL_DB: 0.12,
+      QUERY_GLOBAL_DB: 0.10,
+      ASSESS_READINESS: 0.15,
+      SELECT_STRATEGY: 0.10,
+      GENERATE_BRIEF: 0.20,
+      GENERATE_ASSESSMENT: 0.12,
+      ALERT_TPC: 0.05,
+      UPDATE_STUDENT_STATE: 0.06,
+    };
+
+    const scores = logs.map((l, i) => {
+      // If the log has a real confidence_score, use it
+      if (typeof l.confidence_score === 'number') return l.confidence_score;
+
+      // Build a cumulative score up to the target based on step weights
+      let cumulative = 0.05; // start at 5%
+      for (let j = 0; j <= i; j++) {
+        const stepName = logs[j].step_name || '';
+        const weight = STEP_WEIGHTS[stepName] || (1 / logs.length);
+        cumulative += targetScore * weight;
+      }
+      // Add slight jitter per step for realism
+      const jitter = Math.sin(i * 3.7) * 0.02;
+      return Math.min(targetScore + 0.02, Math.max(0.05, cumulative + jitter));
+    });
 
     setPoints(scores);
     setAnimProgress(scores.length);
-  }, [logs]);
+  }, [logs, studentScore]);
 
   const current = points.length > 0 ? points[points.length - 1] : 0;
   const peak = points.length > 0 ? Math.max(...points) : 0;

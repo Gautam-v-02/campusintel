@@ -223,7 +223,7 @@ export default function DemoScreen() {
         {/* Content Area */}
         <div id="tour-demo-trace" className="mt-6 rounded-xl p-1">
           {activeTab === 'TRACE' && <ReasoningTrace logs={logs} isActive={isRunning} />}
-          {activeTab === 'CHART' && <ConfidenceChart logs={logs} isActive={isRunning} />}
+          {activeTab === 'CHART' && <ConfidenceChart logs={logs} isActive={isRunning} studentScore={student?.confidence_score} />}
           {activeTab === 'BRIEF' && <PrepBrief logs={logs} />}
           {activeTab === 'RESUME' && (
             <div className="space-y-4">
