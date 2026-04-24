@@ -16,12 +16,7 @@ const STATE_STYLE: Record<string, { bg: string; text: string; border: string }> 
   INTERVIEW_READY: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/30' },
 };
 
-const KPIS = [
-  { label: 'Total Registered', value: '247', icon: '👥', sub: 'Across 6 upcoming drives' },
-  { label: 'Briefs Delivered', value: '189', icon: '📋', sub: '76% coverage' },
-  { label: 'At Risk', value: '42', icon: '⚠️', sub: 'Confidence < 0.5', warn: true },
-  { label: 'Drives This Week', value: '3', icon: '🏢', sub: 'Google · Infosys · Wipro' },
-];
+
 
 const ALERTS = [
   { severity: 'high', title: '5 students interviewing Google have CRITICAL system_design gap', sub: 'Rahul Sharma, Dev Kumar + 3 others — avg score 0.42' },
@@ -80,7 +75,20 @@ export default function TpcDashboardPage() {
       }
     };
     loadStudents();
-  }, []);
+  }, [router]);
+
+  // Compute KPIs from real student data
+  const totalStudents = students.length;
+  const atRiskCount = students.filter(s => s.score < 0.5).length;
+  const profiledCount = students.filter(s => s.state !== 'UNAWARE').length;
+  const avgScore = totalStudents > 0 ? (students.reduce((sum, s) => sum + s.score, 0) / totalStudents) : 0;
+
+  const KPIS = [
+    { label: 'Total Students', value: String(totalStudents), icon: '👥', sub: `${profiledCount} profiled` },
+    { label: 'Avg Readiness', value: avgScore.toFixed(2), icon: '📊', sub: avgScore > 0.5 ? 'Above threshold' : 'Below threshold' },
+    { label: 'At Risk', value: String(atRiskCount), icon: '⚠️', sub: 'Confidence < 0.5', warn: atRiskCount > 0 },
+    { label: 'Profiled', value: String(profiledCount), icon: '📋', sub: `${totalStudents > 0 ? Math.round((profiledCount / totalStudents) * 100) : 0}% coverage` },
+  ];
 
   return (
     <div className="flex min-h-screen bg-[#07070f]">

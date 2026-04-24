@@ -283,7 +283,7 @@ export default function DebriefPage() {
           </div>
 
           <div className="flex items-center justify-between">
-            <button onClick={() => { setStatus('idle'); setResult(null); setForm({ roundType: 'technical_1', questionsAsked: '', topicsCovered: [], outcome: 'selected', difficultyRating: 3 }); }}
+            <button onClick={() => { setStatus('idle'); setResult(null); setForm({ roundType: 'technical_1', questionsAsked: '', topicsCovered: [], outcome: 'selected', difficultyRating: 3, selectedDriveId: '', selectedCompanyId: '' }); }}
               className="text-sm text-[#9b9bbb] hover:text-white transition">
               + Submit another debrief
             </button>

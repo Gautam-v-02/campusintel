@@ -115,11 +115,13 @@ export default function Sidebar() {
           <span className="font-medium">Agent Trace</span>
           <span className="ml-auto px-1.5 py-px text-[10px] rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">LIVE</span>
         </Link>
-        <Link href="/tpc/dashboard"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-[#6b7280] hover:text-[#c4c4d8] hover:bg-white/5 transition-all">
-          <span>🏫</span>
-          <span className="font-medium">TPC View</span>
-        </Link>
+        {student?.email === 'tpc@lpu.in' && (
+          <Link href="/tpc/dashboard"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-[#6b7280] hover:text-[#c4c4d8] hover:bg-white/5 transition-all">
+            <span>🏫</span>
+            <span className="font-medium">TPC View</span>
+          </Link>
+        )}
         {/* Fixed: calls logout() to clear localStorage, not just navigate */}
         <button
           onClick={handleSignOut}

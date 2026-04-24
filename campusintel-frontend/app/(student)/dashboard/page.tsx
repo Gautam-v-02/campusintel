@@ -462,7 +462,7 @@ export default function DashboardPage() {
                       onError={(e: React.SyntheticEvent<HTMLImageElement>) => { e.currentTarget.style.display = 'none'; }} />
                     {drives[0].company.name} Drive
                   </div>
-                  <Link href="/briefs/demo-drive-google"
+                  <Link href={`/briefs/${drives[0].id}`}
                     className="px-3 py-1.5 rounded-full text-xs text-white bg-indigo-600 hover:bg-indigo-500 transition">
                     View Brief →
                   </Link>
