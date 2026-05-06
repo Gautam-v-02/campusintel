@@ -10,13 +10,11 @@ const bcrypt = require('bcrypt');
 const SALT_ROUNDS = 12;
 
 // ── Smart keyword-based skill extractor ─────────────────────────────────────
-// Used as fallback when Gemini API is unavailable.
-// Scores skills based on: mention frequency, section context, and experience signals.
+// Multi-signal scoring: frequency + section context + project depth + experience years + proficiency language
+// Returns { scores, missing_skills } — scores are genuinely different per skill
 function smartSkillExtract(text) {
   const lower = text.toLowerCase();
 
-  // Skill definitions: { key, patterns[], weight }
-  // weight = how "impressive" this skill is when found
   const SKILL_DEFS = [
     // Languages
     { key: 'python',      patterns: [/python/g],                                  weight: 1.0 },
@@ -24,7 +22,7 @@ function smartSkillExtract(text) {
     { key: 'java',        patterns: [/\bjava\b/g],                                 weight: 1.0 },
     { key: 'cpp',         patterns: [/c\+\+/g, /\bcpp\b/g],                        weight: 1.0 },
     { key: 'typescript',  patterns: [/typescript/g, /\bts\b/g],                    weight: 1.0 },
-    { key: 'golang',      patterns: [/\bgolang\b/g, /\bgo\b lang/g],               weight: 1.1 },
+    { key: 'golang',      patterns: [/\bgolang\b/g, /\bgo lang/g],                 weight: 1.1 },
     { key: 'rust',        patterns: [/\brust\b/g],                                  weight: 1.2 },
     // Frontend/Backend frameworks
     { key: 'react',       patterns: [/\breact\b/g, /react\.js/g, /reactjs/g],      weight: 1.0 },
@@ -32,88 +30,113 @@ function smartSkillExtract(text) {
     { key: 'nextjs',      patterns: [/next\.?js/g],                                 weight: 1.0 },
     { key: 'django',      patterns: [/django/g],                                     weight: 1.0 },
     { key: 'fastapi',     patterns: [/fastapi/g],                                    weight: 1.1 },
-    { key: 'spring',      patterns: [/spring boot/g, /spring/g],                    weight: 1.0 },
-    // Databases / storage
+    { key: 'spring',      patterns: [/spring boot/g, /\bspring\b/g],                weight: 1.0 },
+    // Databases
     { key: 'sql',         patterns: [/\bsql\b/g, /mysql/g, /postgres/g, /sqlite/g], weight: 0.9 },
-    { key: 'mongodb',     patterns: [/mongodb/g, /mongo\b/g],                        weight: 1.0 },
+    { key: 'mongodb',     patterns: [/mongodb/g, /\bmongo\b/g],                      weight: 1.0 },
     { key: 'redis',       patterns: [/redis/g],                                       weight: 1.1 },
     { key: 'dbms',        patterns: [/\bdbms\b/g, /database design/g, /rdbms/g],     weight: 0.9 },
     // CS fundamentals
-    { key: 'data_structures', patterns: [/data structure/g, /linked list/g, /binary tree/g, /heap\b/g], weight: 0.9 },
+    { key: 'data_structures', patterns: [/data structure/g, /linked list/g, /binary tree/g, /\bheap\b/g], weight: 0.9 },
     { key: 'algorithms',      patterns: [/algorithm/g, /dynamic programming/g, /\bdp\b/g, /graph traversal/g], weight: 1.0 },
     { key: 'system_design',   patterns: [/system design/g, /distributed system/g, /microservice/g, /scalab/g], weight: 1.2 },
-    { key: 'os',              patterns: [/operating system/g, /linux/g, /unix/g, /process scheduling/g],       weight: 0.8 },
-    { key: 'networking',      patterns: [/networking/g, /\btcp\b/g, /http\b/g, /rest\s*api/g, /grpc/g],       weight: 0.9 },
-    { key: 'oops',            patterns: [/object.oriented/g, /\boops\b/g, /oop\b/g, /inheritance/g, /polymorphism/g], weight: 0.8 },
+    { key: 'os',              patterns: [/operating system/g, /\blinux\b/g, /\bunix\b/g, /process scheduling/g], weight: 0.8 },
+    { key: 'networking',      patterns: [/networking/g, /\btcp\b/g, /\bhttp\b/g, /rest\s*api/g, /grpc/g], weight: 0.9 },
+    { key: 'oops',            patterns: [/object.oriented/g, /\boops\b/g, /\boop\b/g, /inheritance/g, /polymorphism/g], weight: 0.8 },
     // Cloud / DevOps
-    { key: 'aws',         patterns: [/\baws\b/g, /amazon web service/g, /ec2/g, /s3\b/g],  weight: 1.1 },
-    { key: 'docker',      patterns: [/docker/g, /container/g],                              weight: 1.1 },
-    { key: 'kubernetes',  patterns: [/kubernetes/g, /\bk8s\b/g],                            weight: 1.3 },
-    { key: 'git',         patterns: [/\bgit\b/g, /github/g, /gitlab/g],                    weight: 0.7 },
+    { key: 'aws',         patterns: [/\baws\b/g, /amazon web service/g, /\bec2\b/g, /\bs3\b/g], weight: 1.1 },
+    { key: 'docker',      patterns: [/docker/g, /container/g],                               weight: 1.1 },
+    { key: 'kubernetes',  patterns: [/kubernetes/g, /\bk8s\b/g],                             weight: 1.3 },
+    { key: 'git',         patterns: [/\bgit\b/g, /github/g, /gitlab/g],                     weight: 0.7 },
     { key: 'ci_cd',       patterns: [/ci\/cd/g, /github actions/g, /jenkins/g, /pipeline/g], weight: 1.1 },
     // ML / AI
     { key: 'machine_learning', patterns: [/machine learning/g, /\bml\b/g, /sklearn/g, /tensorflow/g, /pytorch/g], weight: 1.2 },
-    { key: 'deep_learning',    patterns: [/deep learning/g, /neural network/g, /cnn/g, /lstm/g],              weight: 1.3 },
+    { key: 'deep_learning',    patterns: [/deep learning/g, /neural network/g, /cnn/g, /lstm/g], weight: 1.3 },
   ];
 
-  // Identify high-signal sections in the resume (skills section → higher weight multiplier)
-  const isInSkillsSection = (pattern) => {
-    // Check if the pattern appears near words like "skills", "technologies", "tech stack"
-    const skillsSectionMatch = lower.match(/(skills|technologies|tech stack|technical expertise)[^\n]{0,300}/g) || [];
-    return skillsSectionMatch.some(section => pattern.test(section));
-  };
+
+  // ── Context windows for section detection ──────────────────
+  const skillsSectionText  = (lower.match(/(skills|technologies|tech stack|technical expertise)[^\n]{0,400}/g) || []).join(' ');
+  const projectSectionText = (lower.match(/(project|projects|built|developed|created|implemented)[^\n]{0,400}/g) || []).join(' ');
+  const expSectionText     = (lower.match(/(experience|internship|work|employment)[^\n]{0,400}/g) || []).join(' ');
 
   const scores = {};
 
   for (const { key, patterns, weight } of SKILL_DEFS) {
     let totalMatches = 0;
-    let inSkillsSection = false;
+    let inSkillsSection  = false;
+    let inProjectSection = false;
+    let inExpSection     = false;
 
     for (const pattern of patterns) {
-      const globalPattern = new RegExp(pattern.source, 'gi');
-      const matches = lower.match(globalPattern);
-      totalMatches += matches ? matches.length : 0;
-      if (!inSkillsSection) inSkillsSection = isInSkillsSection(globalPattern);
+      const gp = new RegExp(pattern.source, 'gi');
+      const allMatches = lower.match(gp);
+      totalMatches += allMatches ? allMatches.length : 0;
+      if (!inSkillsSection  && gp.test(skillsSectionText))  inSkillsSection  = true;
+      if (!inProjectSection && gp.test(projectSectionText)) inProjectSection = true;
+      if (!inExpSection     && gp.test(expSectionText))     inExpSection     = true;
     }
 
-    if (totalMatches === 0) continue;
+    if (totalMatches === 0) continue; // skill completely absent
 
-    // Base score: frequency-scaled (1 mention → 0.45, 3 mentions → 0.65, 7+ → 0.85)
-    let baseScore = Math.min(0.85, 0.35 + (Math.log(totalMatches + 1) / Math.log(8)) * 0.5);
+    // Signal 1: Frequency (log scale) — 1 mention→0.35, 3→0.52, 8+→0.70
+    let score = Math.min(0.70, 0.28 + (Math.log(totalMatches + 1) / Math.log(10)) * 0.55);
 
-    // Boost for skills section presence
-    if (inSkillsSection) baseScore = Math.min(0.95, baseScore + 0.12);
+    // Signal 2: Section context (additive, non-stacking beyond 0.15)
+    let sectionBoost = 0;
+    if (inSkillsSection)  sectionBoost = Math.max(sectionBoost, 0.15); // listed as a skill
+    if (inProjectSection) sectionBoost = Math.max(sectionBoost, 0.08); // used in a project
+    if (inExpSection)     sectionBoost = Math.max(sectionBoost, 0.05); // mentioned in experience
+    score += sectionBoost;
 
-    // Apply skill weight (harder/rarer skills get a small bump)
-    baseScore = Math.min(0.95, baseScore * weight);
+    // Signal 3: Project depth — "built X with Y" / "developed X using Y"
+    const depthPattern = new RegExp(
+      `(built|developed|created|implemented|designed)\\s+\\w+\\s+(using|with|in|on)\\s+[^.]{0,60}${key.replace(/_/g, '[ _]')}`,
+      'i'
+    );
+    if (depthPattern.test(lower)) score += 0.10; // concretely used in a project
 
-    // Round to 2 decimal places
-    scores[key] = Math.round(baseScore * 100) / 100;
+    // Apply skill difficulty weight
+    score = score * weight;
+
+    scores[key] = Math.min(0.95, Math.round(score * 100) / 100);
   }
 
-  // Look for experience-level signals: "3 years of X", "X expert", "proficient in X"
-  const expertPatterns = [
-    { regex: /expert\s+in\s+(\w+)/gi, boost: 0.15 },
-    { regex: /proficient\s+in\s+(\w+)/gi, boost: 0.10 },
-    { regex: /(\d+)\+?\s+years?\s+(?:of\s+)?(?:experience\s+(?:in|with)\s+)?(\w+)/gi, boost: 0.12 },
-    { regex: /strong\s+(?:foundation\s+in|knowledge\s+of)\s+(\w+)/gi, boost: 0.08 },
+  // ── Signal 4: Experience-year & proficiency language boosts ──
+  const boostRules = [
+    { regex: /(\d+)\+?\s+years?\s+(?:of\s+)?(?:experience\s+(?:in|with)\s+)?(\w+)/gi, boost: (m) => Math.min(0.18, 0.06 * parseInt(m[1])) },
+    { regex: /expert\s+in\s+(\w+)/gi,          boost: () => 0.18 },
+    { regex: /proficient\s+in\s+(\w+)/gi,       boost: () => 0.12 },
+    { regex: /strong\s+(?:foundation|knowledge)\s+(?:in|of)\s+(\w+)/gi, boost: () => 0.09 },
+    { regex: /familiar\s+with\s+(\w+)/gi,       boost: () => -0.05 }, // downgrade "familiar with"
+    { regex: /basic\s+(?:knowledge\s+of\s+)?(\w+)/gi, boost: () => -0.08 }, // downgrade "basic"
   ];
 
-  for (const { regex, boost } of expertPatterns) {
+  for (const { regex, boost } of boostRules) {
     const matches = [...lower.matchAll(regex)];
     for (const match of matches) {
-      const mentionedSkill = match[match.length - 1]?.toLowerCase();
+      const mentionedSkill = match[match.length - 1]?.toLowerCase() || '';
       for (const key of Object.keys(scores)) {
-        if (mentionedSkill && key.includes(mentionedSkill.substring(0, 4))) {
-          scores[key] = Math.min(0.95, scores[key] + boost);
+        if (mentionedSkill && (key.startsWith(mentionedSkill.substring(0, 4)) || mentionedSkill.startsWith(key.substring(0, 4)))) {
+          const b = typeof boost === 'function' ? boost(match) : boost;
+          scores[key] = Math.max(0.05, Math.min(0.95, scores[key] + b));
+          scores[key] = Math.round(scores[key] * 100) / 100;
         }
       }
     }
   }
 
-  console.log(`[SmartExtract] Detected ${Object.keys(scores).length} skills:`, scores);
-  return scores;
+  // ── Missing skills: all known skills NOT found in the resume ──
+  const missing_skills = SKILL_DEFS
+    .filter(({ key }) => !(key in scores))
+    .map(({ key }) => key);
+
+  console.log(`[SmartExtract] Detected ${Object.keys(scores).length} skills, missing ${missing_skills.length}:`, scores);
+  return { scores, missing_skills };
 }
+
+
+
 
 
 
@@ -304,6 +327,8 @@ router.post('/upload-resume', async (req, res) => {
 
   // Extract skills via Gemini
   let inferredSkills = {};
+  let missingSkills  = [];
+
   try {
     const systemPrompt = `You are a technical recruiter. Extract skills from a student's resume.
 Return ONLY valid JSON no markdown. Start directly with {`;
@@ -336,13 +361,17 @@ Example output:
     }
   } catch (skillErr) {
     console.warn('[Resume] Skill extraction failed, using smart keyword fallback:', skillErr.message);
-    inferredSkills = smartSkillExtract(resumeText);
+    const fallback = smartSkillExtract(resumeText);
+    inferredSkills = fallback.scores;
+    missingSkills  = fallback.missing_skills;
   }
 
   // If Gemini returned something but it parsed to empty object, also run smart fallback
   if (Object.keys(inferredSkills).length === 0) {
     console.warn('[Resume] Gemini returned empty skills, using smart keyword fallback');
-    inferredSkills = smartSkillExtract(resumeText);
+    const fallback = smartSkillExtract(resumeText);
+    inferredSkills = fallback.scores;
+    missingSkills  = fallback.missing_skills;
   }
 
   // Save to Supabase
@@ -362,15 +391,16 @@ Example output:
   }
 
   const skillCount = Object.keys(inferredSkills).length;
-  console.log(`[Resume] ✅ Parsed resume for ${studentId}. Extracted ${skillCount} skills.`);
+  console.log(`[Resume] ✅ Parsed resume for ${studentId}. Extracted ${skillCount} skills, missing ${missingSkills.length}.`);
 
   res.json({
     success: true,
     student_id: studentId,
     skills_extracted: skillCount,
     inferred_skills: inferredSkills,
+    missing_skills: missingSkills,   // skills NOT found in the resume at all
     resume_preview: resumeText.substring(0, 300) + '...',
-    message: `Resume parsed! ${skillCount} skills extracted and saved to your profile.`,
+    message: `Resume parsed! ${skillCount} skills found. ${missingSkills.length} skills not detected in your resume.`,
   });
 });
 

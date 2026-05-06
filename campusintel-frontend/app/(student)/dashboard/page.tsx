@@ -195,13 +195,16 @@ export default function DashboardPage() {
   const skills = student?.inferred_skills
     ? Object.entries(student.inferred_skills as Record<string, number>)
         .sort(([, a], [, b]) => b - a)
-        .slice(0, 6)
         .map(([name, level]) => ({
           name: name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          rawKey: name,
           level: level as number,
-          status: (level as number) < 0.3 ? 'CRITICAL' : (level as number) < 0.6 ? 'MODERATE' : 'OK',
+          status: (level as number) < 0.35 ? 'CRITICAL' : (level as number) < 0.65 ? 'MODERATE' : 'OK',
         }))
     : [];
+
+  // Weak skills for alert banner
+  const criticalSkills = skills.filter(s => s.status === 'CRITICAL');
 
   const readinessScore = student?.confidence_score || 0;
 
@@ -234,6 +237,21 @@ export default function DashboardPage() {
 
 
         <div className="max-w-[1200px] mx-auto space-y-6 relative z-10">
+          {/* Weak skill alert banner */}
+          {criticalSkills.length > 0 && (
+            <div className="mt-2 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs">
+              <span className="text-base flex-shrink-0">⚠️</span>
+              <span className="flex-1">
+                <strong>{criticalSkills.length} skill{criticalSkills.length > 1 ? 's' : ''} need attention</strong>:
+                {' '}{criticalSkills.slice(0, 3).map(s => s.name).join(', ')}
+                {criticalSkills.length > 3 ? ` +${criticalSkills.length - 3} more` : ''}
+              </span>
+              <Link href="/revision" className="px-3 py-1 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition font-semibold whitespace-nowrap">
+                Revise Now →
+              </Link>
+            </div>
+          )}
+
           {/* Welcome header */}
           {student?.name && (
             <div className="flex items-center justify-between mb-2">
@@ -298,9 +316,9 @@ export default function DashboardPage() {
                 </div>
               ) : skills.length > 0 ? (
                 <div id="tour-skills-breakdown" className="space-y-2.5 rounded-xl p-2">
-                  {skills.map(skill => (
+                  {skills.slice(0, 8).map(skill => (
                     <div key={skill.name} className="flex items-center gap-3">
-                      <span className="text-xs text-[#9b9bbb] w-24 flex-shrink-0">{skill.name}</span>
+                      <span className="text-xs text-[#9b9bbb] w-28 flex-shrink-0 truncate">{skill.name}</span>
                       <div className="flex-1 h-1.5 bg-[#2a2a3d] rounded-full overflow-hidden">
                         <div className="h-full rounded-full transition-all duration-700"
                           style={{
@@ -315,6 +333,9 @@ export default function DashboardPage() {
                       }`}>{skill.status}</span>
                     </div>
                   ))}
+                  <Link href="/revision" className="block text-center text-[11px] text-indigo-400 hover:text-indigo-300 transition mt-2 pt-2 border-t border-[#2a2a3d]">
+                    View all {skills.length} skills + missing topics →
+                  </Link>
                 </div>
               ) : (
                 <div className="text-center py-6 text-[#4b4b6b] text-sm">

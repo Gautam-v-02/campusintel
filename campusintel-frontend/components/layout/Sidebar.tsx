@@ -10,8 +10,10 @@ const NAV_ITEMS = [
   { icon: '📋', label: 'My Briefs', href: '/briefs', id: 'nav-briefs' },
   { icon: '🏢', label: 'Drives', href: '/drives', id: 'nav-drives' },
   { icon: '🤝', label: 'Debriefs', href: '/debrief', id: 'nav-debrief', redDot: true },
+  { icon: '📖', label: 'Revision Topics', href: '/revision', id: 'nav-revision' },
   { icon: '📊', label: 'Progress', href: '/progress', id: 'nav-progress' },
 ];
+
 
 export default function Sidebar() {
   const pathname = usePathname();
