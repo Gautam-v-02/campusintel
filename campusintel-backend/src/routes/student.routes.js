@@ -5,6 +5,9 @@ const pdfParse = require('pdf-parse');
 const claudeService = require('../services/claude.service');
 const { v4: uuidv4 } = require('uuid');
 const { signToken, requireAuth } = require('../middleware/auth.middleware');
+const bcrypt = require('bcrypt');
+
+const SALT_ROUNDS = 12;
 
 // ── Smart keyword-based skill extractor ─────────────────────────────────────
 // Used as fallback when Gemini API is unavailable.
@@ -116,14 +119,18 @@ function smartSkillExtract(text) {
 
 /**
  * POST /api/student/register
- * Create a new student account (email-based, no password)
- * Body: { name, email, collegeId, branch, batchYear, cgpa }
+ * Create a new student account with a hashed password.
+ * Body: { name, email, password, collegeId, branch, batchYear, cgpa }
  */
 router.post('/register', async (req, res) => {
-  const { name, email, collegeId = 'college-lpu-001', branch, batchYear, cgpa } = req.body;
+  const { name, email, password, collegeId = 'college-lpu-001', branch, batchYear, cgpa } = req.body;
 
-  if (!name || !email) {
-    return res.status(400).json({ error: 'name and email are required' });
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'name, email, and password are required' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
   }
 
   // Normalise email
@@ -137,16 +144,14 @@ router.post('/register', async (req, res) => {
     .single();
 
   if (existing) {
-    const token = signToken(existing);
-    console.log(`[Register] Email already exists, returning existing user: ${existing.id}`);
-    return res.json({
-      success: true,
+    return res.status(409).json({
+      error: 'An account with this email already exists. Please log in.',
       already_exists: true,
-      student: existing,
-      token,
-      message: 'Account already exists. Signed in automatically.',
     });
   }
+
+  // Hash password — never store plain-text
+  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
   // Create new user
   const studentId = `student-${uuidv4().slice(0, 8)}`;
@@ -158,6 +163,7 @@ router.post('/register', async (req, res) => {
       college_id: collegeId,
       name: name.trim(),
       email: normalizedEmail,
+      password_hash: passwordHash,
       role: 'student',
       batch_year: batchYear ? parseInt(batchYear) : null,
       branch: branch || null,
@@ -168,7 +174,7 @@ router.post('/register', async (req, res) => {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .select()
+    .select('id, name, email, college_id, role, branch, cgpa, batch_year, current_state, confidence_score, inferred_skills, updated_at')
     .single();
 
   if (insertErr) {
@@ -181,7 +187,7 @@ router.post('/register', async (req, res) => {
   res.json({
     success: true,
     already_exists: false,
-    student: newUser,
+    student: newUser,   // password_hash is NOT selected, so it's never sent to client
     token,
     message: 'Account created successfully!',
   });
@@ -189,21 +195,22 @@ router.post('/register', async (req, res) => {
 
 /**
  * POST /api/student/login
- * Email-lookup based auth — finds user by email, returns profile
- * Body: { email }
+ * Verifies email + password (bcrypt) and returns a JWT.
+ * Body: { email, password }
  */
 router.post('/login', async (req, res) => {
-  const { email } = req.body;
+  const { email, password } = req.body;
 
-  if (!email) {
-    return res.status(400).json({ error: 'email is required' });
+  if (!email || !password) {
+    return res.status(400).json({ error: 'email and password are required' });
   }
 
   const normalizedEmail = email.trim().toLowerCase();
 
+  // Fetch user including password_hash for verification
   const { data: user, error } = await supabase
     .from('users')
-    .select('id, name, email, college_id, role, branch, cgpa, batch_year, current_state, confidence_score, inferred_skills, updated_at')
+    .select('id, name, email, college_id, role, branch, cgpa, batch_year, current_state, confidence_score, inferred_skills, updated_at, password_hash')
     .eq('email', normalizedEmail)
     .single();
 
@@ -214,13 +221,22 @@ router.post('/login', async (req, res) => {
     });
   }
 
-  const token = signToken(user);
-  console.log(`[Login] ✅ ${user.name} signed in (${user.id})`);
+  // Verify password against stored hash
+  const isMatch = await bcrypt.compare(password, user.password_hash || '');
+  if (!isMatch) {
+    return res.status(401).json({ error: 'Incorrect password. Please try again.' });
+  }
+
+  // Strip password_hash before sending to client
+  const { password_hash, ...safeUser } = user;
+
+  const token = signToken(safeUser);
+  console.log(`[Login] ✅ ${safeUser.name} signed in (${safeUser.id})`);
   res.json({
     success: true,
-    student: user,
+    student: safeUser,
     token,
-    message: `Welcome back, ${user.name}!`,
+    message: `Welcome back, ${safeUser.name}!`,
   });
 });
 

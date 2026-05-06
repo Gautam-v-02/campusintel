@@ -17,16 +17,28 @@ export default function OnboardingPage() {
   const [form, setForm] = useState({
     name: '',
     email: '',
+    password: '',
+    confirmPassword: '',
     branch: '',
     batchYear: '',
     cgpa: '',
     collegeId: 'college-lpu-001',
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim() || !form.email.trim()) {
       setErrorMsg('Name and email are required.');
+      return;
+    }
+    if (!form.password || form.password.length < 6) {
+      setErrorMsg('Password must be at least 6 characters.');
+      return;
+    }
+    if (form.password !== form.confirmPassword) {
+      setErrorMsg('Passwords do not match.');
       return;
     }
 
@@ -37,6 +49,7 @@ export default function OnboardingPage() {
       const res = await api.register({
         name: form.name.trim(),
         email: form.email.trim().toLowerCase(),
+        password: form.password,
         collegeId: form.collegeId,
         branch: form.branch || undefined,
         batchYear: form.batchYear ? parseInt(form.batchYear) : undefined,
@@ -108,7 +121,7 @@ export default function OnboardingPage() {
               Create your account
             </h1>
             <p className="text-[#8b8b9f] text-base text-center mb-8">
-              Takes 30 seconds. No passwords — just your college email.
+              Takes 30 seconds. Set a password to secure your account.
             </p>
 
             <form onSubmit={handleRegister} className="space-y-4 bg-[#0f0f1a] border border-[#2a2a3d] rounded-2xl p-8">
@@ -132,6 +145,52 @@ export default function OnboardingPage() {
                     placeholder="rahul@lpu.in"
                     className="w-full h-11 rounded-lg bg-[#0a0a14] border border-[#2a2a3d] px-3 text-[#e8e6f8] placeholder:text-[#4b4b6b] text-sm outline-none focus:border-indigo-500/60 transition"
                   />
+                </div>
+              </div>
+
+              {/* Password + Confirm */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] uppercase tracking-widest text-[#6b7280] font-semibold mb-1.5 block">Password *</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={form.password}
+                      onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                      placeholder="Min 6 characters"
+                      className="w-full h-11 rounded-lg bg-[#0a0a14] border border-[#2a2a3d] px-3 pr-9 text-[#e8e6f8] placeholder:text-[#4b4b6b] text-sm outline-none focus:border-indigo-500/60 transition"
+                    />
+                    <button type="button" onClick={() => setShowPassword(v => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#4b4b6b] hover:text-indigo-400 transition" tabIndex={-1}>
+                      {showPassword
+                        ? <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                        : <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      }
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase tracking-widest text-[#6b7280] font-semibold mb-1.5 block">Confirm Password *</label>
+                  <div className="relative">
+                    <input
+                      type={showConfirm ? 'text' : 'password'}
+                      value={form.confirmPassword}
+                      onChange={e => setForm(f => ({ ...f, confirmPassword: e.target.value }))}
+                      placeholder="Repeat password"
+                      className={`w-full h-11 rounded-lg bg-[#0a0a14] border px-3 pr-9 text-[#e8e6f8] placeholder:text-[#4b4b6b] text-sm outline-none focus:border-indigo-500/60 transition ${
+                        form.confirmPassword && form.confirmPassword !== form.password
+                          ? 'border-red-500/60'
+                          : 'border-[#2a2a3d]'
+                      }`}
+                    />
+                    <button type="button" onClick={() => setShowConfirm(v => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#4b4b6b] hover:text-indigo-400 transition" tabIndex={-1}>
+                      {showConfirm
+                        ? <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                        : <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      }
+                    </button>
+                  </div>
                 </div>
               </div>
 

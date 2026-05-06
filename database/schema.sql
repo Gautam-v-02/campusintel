@@ -36,6 +36,7 @@ create table if not exists users (
   college_id text not null references colleges(id),
   name text not null,
   email text unique not null,
+  password_hash text,                           -- bcrypt hash; null for legacy rows
   phone text,
   role text not null check (role in ('student', 'tpc_admin', 'super_admin')),
   batch_year integer,

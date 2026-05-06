@@ -45,9 +45,9 @@ export const api = {
     post('/api/agent/trigger', { studentId, driveId }),
 
   // ── Auth ───────────────────────────────────────────────────────
-  login: (email: string) => post('/api/student/login', { email }),
+  login: (email: string, password: string) => post('/api/student/login', { email, password }),
   register: (data: {
-    name: string; email: string; collegeId?: string;
+    name: string; email: string; password: string; collegeId?: string;
     branch?: string; batchYear?: number; cgpa?: number;
   }) => post('/api/student/register', data),
 
