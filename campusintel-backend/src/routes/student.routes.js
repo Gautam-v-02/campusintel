@@ -221,8 +221,16 @@ router.post('/login', async (req, res) => {
     });
   }
 
-  // Verify password against stored hash
-  const isMatch = await bcrypt.compare(password, user.password_hash || '');
+  // Legacy accounts (seeded before password auth) have no hash — must be reset
+  if (!user.password_hash) {
+    return res.status(401).json({
+      error: 'This account has no password set. Please contact your TPC admin to reset it.',
+      no_password: true,
+    });
+  }
+
+  // Verify password against stored bcrypt hash
+  const isMatch = await bcrypt.compare(password, user.password_hash);
   if (!isMatch) {
     return res.status(401).json({ error: 'Incorrect password. Please try again.' });
   }
